@@ -14,29 +14,31 @@
   "solution_name": "kernelforge_rmsnorm_h4096_cuda_v1",
   "best_sol_vs_base": 0.893,
   "pending_candidate": {
-    "round": 1,
-    "candidate_variant": "round1-v2",
-    "solution_name": "kernelforge_rmsnorm_h4096_cuda_v2",
+    "round": 2,
+    "candidate_variant": "round2-v1",
+    "solution_name": "kernelforge_rmsnorm_h4096_cuda_v3",
     "kernel_file": "kernels/operators/rmsnorm/rmsnorm_h4096_tvmffi.cu",
-    "status": "PENDING_VALIDATION",
-    "direction": "小 batch 分裂并行 + 多阶段归约",
+    "status": "REJECTED",
+    "direction": "单阶段路径上的寄存器预算 + cache hint + ILP",
     "workflow_kernel": "kernels/operators/rmsnorm/rmsnorm_final.cu",
     "workflow_benchmark": "scripts/workflow/run_optimization_cycle.py"
   },
-  "latest_ncu_summary": "batch=16 时我的实现内存吞吐约 5.70%，官方 baseline 约 35.99%；grid=16 仅覆盖约 1/3 SM，说明小 batch 并行度不足且访存事务不够紧凑。",
-  "next_direction": "优先提升小 batch 并行度，并减少低效访存事务。",
-  "next_technique": "优先验证当前分裂并行候选；若收益不足，再尝试多行并行或更紧凑的 apply 阶段调度，同时保持 bfloat16 向量化与两级归约路径。",
+  "latest_ncu_summary": "Round 2 v3 的主要瓶颈仍然是小 batch 下的 single-pass small-grid + long scoreboard stalls：batch=16 时只有 16 blocks / 0.074 waves/SM，long scoreboard 达到 16.49。; 真实验证显示 v3 在 14/14 workload 上正确，但平均 sol/base 只有 0.783x；真实 NCU 显示虽然寄存器数降到 28，但 memory throughput 仍低于官方 baseline，long scoreboard stalls 反而显著更重。",
+  "next_direction": "单阶段寄存器预算已经验证无效，下一轮必须直接解决 batch=16 只有 16 CTA 的结构性并行度瓶颈，同时避免 Round 1 三段式那种额外 finalize 开销。",
+  "next_technique": "下一轮优先尝试单 kernel 的多 CTA/row 设计（如原子累计 partial sum + 同核收尾，或可控的持久化工作分配），目标是在不引入独立 finalize 小 grid 的前提下把 waves/SM 明显抬高。",
   "latest_result": {
-    "round": 0,
-    "candidate_variant": "round0-v1",
-    "solution_name": "kernelforge_rmsnorm_h4096_cuda_v1",
+    "round": 2,
+    "candidate_variant": "round2-v1",
+    "solution_name": "kernelforge_rmsnorm_h4096_cuda_v3",
     "decision": "REJECT",
     "passed_workloads": 14,
     "total_workloads": 14,
-    "avg_sol_vs_ref": null,
-    "avg_sol_vs_base": 0.893,
-    "reason": "正确性已通过，但 sol/base 仅 0.893x，低于 1.05x 验收线。",
-    "evaluated_at": "2026-06-16T00:00:00+08:00"
+    "avg_sol_vs_ref": 6.542,
+    "avg_sol_vs_base": 0.71,
+    "ncu_summary": "Round 2 v3 的主要瓶颈仍然是小 batch 下的 single-pass small-grid + long scoreboard stalls：batch=16 时只有 16 blocks / 0.074 waves/SM，long scoreboard 达到 16.49。; 真实验证显示 v3 在 14/14 workload 上正确，但平均 sol/base 只有 0.783x；真实 NCU 显示虽然寄存器数降到 28，但 memory throughput 仍低于官方 baseline，long scoreboard stalls 反而显著更重。",
+    "kernelwiki_primary_page": "skills/KernelWiki/wiki/patterns/low-sm-utilization.md",
+    "reason": "sol/base = 0.710x，低于 1.05x 验收线",
+    "evaluated_at": "2026-06-16T18:46:21+08:00"
   },
-  "updated_at": "2026-06-16T00:00:00+08:00"
+  "updated_at": "2026-06-16T18:46:21.487294"
 }

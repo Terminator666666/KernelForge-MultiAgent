@@ -135,6 +135,15 @@ if kernelwiki.get("status") != "COMPLETE":
 solution_profile = ncu.get("solution_profile") or {}
 baseline_profile = ncu.get("baseline_profile") or {}
 comparison_summary = ncu.get("comparison_summary") or {}
+required_ncu_binary = str(
+    ncu.get("required_ncu_binary", "/usr/local/NVIDIA-Nsight-Compute-2025.2/ncu")
+).strip()
+required_ncu_version = str(ncu.get("required_ncu_version", "2025.2")).strip()
+
+if required_ncu_binary != "/usr/local/NVIDIA-Nsight-Compute-2025.2/ncu":
+    fail("Error: required_ncu_binary 必须固定为 /usr/local/NVIDIA-Nsight-Compute-2025.2/ncu")
+if required_ncu_version != "2025.2":
+    fail("Error: required_ncu_version 必须固定为 2025.2")
 
 for label, profile in (("solution", solution_profile), ("baseline", baseline_profile)):
     report_path_raw = str(profile.get("report_path", "")).strip()
@@ -143,6 +152,11 @@ for label, profile in (("solution", solution_profile), ("baseline", baseline_pro
         fail(f"Error: NCU evidence 缺少 {label} report_path")
     if not command:
         fail(f"Error: NCU evidence 缺少 {label} command")
+    if required_ncu_binary not in command:
+        fail(
+            f"Error: {label} NCU command 必须使用 {required_ncu_binary}，"
+            "禁止使用 /usr/local/cuda/bin/ncu"
+        )
     report_path = Path(report_path_raw)
     if not report_path.is_absolute():
         report_path = (round_dir / report_path).resolve()
@@ -195,6 +209,7 @@ fields = {
     "KERNELWIKI_EVIDENCE_FILE": str(kernelwiki_file),
     "NCU_BOTTLENECK": bottleneck,
     "NCU_DECISION_DRIVER": decision_driver,
+    "NCU_REQUIRED_BINARY": required_ncu_binary,
     "KERNELWIKI_PAGE_COUNT": str(len(pages)),
     "KERNELWIKI_PRIMARY_PAGE": primary_page,
 }
@@ -204,6 +219,7 @@ for key, value in fields.items():
 PY
 )"
 echo "  ✓ NCU evidence    : $NCU_EVIDENCE_FILE"
+echo "  ✓ NCU binary      : $NCU_REQUIRED_BINARY"
 echo "  ✓ KernelWiki refs : $KERNELWIKI_EVIDENCE_FILE"
 echo "  ✓ NCU bottleneck  : $NCU_BOTTLENECK"
 echo "  ✓ Decision driver : $NCU_DECISION_DRIVER"

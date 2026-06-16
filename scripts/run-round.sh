@@ -5,6 +5,7 @@
 # - 优先从 reference/<family>/baseline.json 读取锚点、数据集、definition、上一轮结论
 # - 自动为本轮生成 round_config.json / BRIEF.md / draft.md
 # - 自动生成 NCU / KernelWiki 证据模板，未补齐前不得进入最终决策
+# - RTX 5070 / sm_120 的 NCU 证据只能使用 /usr/local/NVIDIA-Nsight-Compute-2025.2/ncu
 # - 对 rmsnorm 额外生成 src/gen_solution.py，方便把当前 kernel.cu 写回 flashinfer-trace
 # - 不执行 benchmark / validate，只准备好本轮工作区
 
@@ -267,7 +268,8 @@ $GOAL_BLOCK
 - **KernelWiki 依据文件**: \`$KERNELWIKI_EVIDENCE_FILE\`
 - **规则 1**: 必须同时填写 solution 与官方 baseline 的真实 NCU 报告
 - **规则 2**: 必须记录本轮参考的 KernelWiki 页面，并说明其为何适用于本轮
-- **规则 3**: 没有补齐这两个文件时，\`./scripts/evaluate-round.sh\` 会直接失败，不允许进入决策
+- **规则 3**: NCU 只能使用 \`/usr/local/NVIDIA-Nsight-Compute-2025.2/ncu\`；禁止使用 \`/usr/local/cuda/bin/ncu\`
+- **规则 4**: 没有补齐这两个文件时，\`./scripts/evaluate-round.sh\` 会直接失败，不允许进入决策
 
 ## 约束
 - 必须使用真实 FlashInfer-Bench 数据集：\`$DATASET_PATH\`
@@ -316,6 +318,8 @@ cat > "$NCU_EVIDENCE_FILE" <<EOF
   "family": "$FAMILY",
   "definition": "$DEFINITION",
   "device": "RTX 5070 Laptop / sm_120",
+  "required_ncu_binary": "/usr/local/NVIDIA-Nsight-Compute-2025.2/ncu",
+  "required_ncu_version": "2025.2",
   "collected_at": "",
   "solution_profile": {
     "kernel_or_solution": "$CANDIDATE_SOLUTION",

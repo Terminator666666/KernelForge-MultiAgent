@@ -19,9 +19,15 @@
   「vs 参考实现 PyTorch」的加速比（`sol/ref`）只能用于确认正确性，**不得**作为成绩，
   因为打过朴素 PyTorch 对带宽瓶颈算子毫无含金量。
 - **闭环强制要求**：每一轮优化必须有本机真实 NCU 数据驱动，禁止凭空猜测优化方向。
+- **NCU 版本强制要求**：RTX 5070 / sm_120 的 Nsight Compute 采样只能使用
+  `/usr/local/NVIDIA-Nsight-Compute-2025.2/ncu`。禁止使用 `/usr/local/cuda/bin/ncu`，
+  因为后者在当前 WSL 环境会报 `LibraryNotLoaded`，不能作为有效证据。
 - **决策依据强制要求**：每一轮的 ACCEPT / REJECT 都必须同时引用：
   1. 本轮真实 NCU 报告（solution + 官方 baseline 各一份）；
   2. `skills/KernelWiki` 中与本轮瓶颈对应的页面。
+- **baseline NCU 复用规则**：官方 baseline 的 NCU 报告可以复用，但仅限
+  `definition + batch_size + device + baseline_solution + NCU版本` 完全一致的情况；
+  一旦其中任何一项变化，就必须重新采样。
 - **KernelWiki 使用规则**：RTX 5070 / sm_120 属于 Blackwell 架构，因此每轮都必须先查
   `skills/KernelWiki` 再定方向；但要明确区分 **可迁移模式**（如 low-sm-utilization、
   memory-bound、vectorized-loads、register-budgeting）与 **仅限 SM100/B200 的特性**
