@@ -48,6 +48,24 @@ Master Agent 决策
   - 但 **KernelForge-MultiAgent 当前闭环目标只限上述 6 类**；
   - 其他算子默认仅保留样板、验证或参考价值，除非用户单独要求重开。
 
+### 当前主线实现方式（强制）
+- 所有主线算子都必须在**独立工作区**里推进。
+- 起点不是“直接改 FlashInfer 官方源码仓库里的内核”，而是：
+  1. 读取官方 task / baseline 的语义与接口；
+  2. 明确 shape contract、correctness contract、baseline 行为；
+  3. 在自己的工作区里**自写新的 kernel variant**（Triton / CUDA / CuTe DSL）。
+- 允许参考官方 baseline 的接口、行为和 profile 证据；
+  但默认**不把“直接 patch 官方内核源码”作为主线优化方式**。
+
+### 当前主线成绩口径（强制）
+- 最终只认**相对 FlashInfer 官方 baseline / expert baseline 的提升**。
+- 轮内允许做：
+  - candidate vs parent
+  - candidate vs 历史 anchor
+  - candidate vs 参考实现
+- 但这些都只是中间证据，**不能替代最终成绩口径**。
+- 最终归档、README 结论、ACCEPT/REJECT，一律以官方 baseline / expert baseline 为分母。
+
 ---
 
 ## 🚀 快速开始

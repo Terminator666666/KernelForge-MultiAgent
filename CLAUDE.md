@@ -16,6 +16,9 @@
   6. `moe_fp8`
   FlashInfer-Bench 上游仍覆盖更多算子，但本仓库当前**不再把** `rmsnorm`、`gemm`、`rope`、
   `sampling`、`gqa_ragged` 等作为主线闭环目标；除非用户单独下达重开指令。
+- **实现方式强制要求**：所有主线算子都必须在**独立工作区**中推进，基于官方 task /
+  baseline 的语义、接口、shape contract 与 correctness contract，自写新的 Triton / CUDA /
+  CuTe DSL kernel；默认**禁止把直接修改 FlashInfer 官方源码仓库中的内核实现**作为主线工作方式。
 - **Acceptance criterion**: All generated operator code must pass FlashInfer-Bench
   validation (`D:/Agent/flashinfer-bench-main`) to be considered successful.
   Internal benchmarks are for development only.
@@ -24,6 +27,9 @@
   （官方 baseline = 数据集 `solutions/baseline/...` 里的 flashinfer 实现）。
   「vs 参考实现 PyTorch」的加速比（`sol/ref`）只能用于确认正确性，**不得**作为成绩，
   因为打过朴素 PyTorch 对带宽瓶颈算子毫无含金量。
+- **最终成绩口径强制要求**：每个主线算子的最终结论只能认
+  **相对 FlashInfer 官方 baseline / expert baseline 的提升**；允许在轮内做
+  candidate-vs-parent 的 A/B，但那只能作为局部优化证据，不能替代最终成绩口径。
 - **闭环强制要求**：每一轮优化必须有本机真实 NCU 数据驱动，禁止凭空猜测优化方向。
 - **NCU 版本强制要求**：RTX 5070 / sm_120 的 Nsight Compute 采样只能使用
   `/usr/local/NVIDIA-Nsight-Compute-2025.2/ncu`。禁止使用 `/usr/local/cuda/bin/ncu`，
