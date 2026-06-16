@@ -7,9 +7,15 @@
   skills for Blackwell/B200 optimization and Nsight Compute analysis.
 - **执行环境规则**：禁止在 Windows 主环境运行代码；但如果当前在 WSL / Linux 环境，
   则允许执行构建、验证、benchmark、Nsight Compute profile，并以真实运行结果作为闭环证据。
-- **Supported operators**: 10 types aligned with FlashInfer-Bench - `gemm`, 
-  `gqa_paged`, `gqa_ragged`, `mla_paged`, `dsa_paged`, `moe`, `rmsnorm`, `rope`, 
-  `sampling`, `gdn`. See `docs/SUPPORTED_OPERATORS.md` for details.
+- **主动优化范围（强制）**：当前仓库的闭环优化只允许聚焦 6 类高收益算子：
+  1. `dsa_sparse_attention`
+  2. `gdn_prefill`
+  3. `gdn_decode`
+  4. `dsa_topk_indexer`
+  5. `paged_attention`（含 `gqa_paged_decode`、`mla_paged_decode`、`mla_paged_prefill`）
+  6. `moe_fp8`
+  FlashInfer-Bench 上游仍覆盖更多算子，但本仓库当前**不再把** `rmsnorm`、`gemm`、`rope`、
+  `sampling`、`gqa_ragged` 等作为主线闭环目标；除非用户单独下达重开指令。
 - **Acceptance criterion**: All generated operator code must pass FlashInfer-Bench
   validation (`D:/Agent/flashinfer-bench-main`) to be considered successful.
   Internal benchmarks are for development only.
@@ -25,6 +31,8 @@
 - **决策依据强制要求**：每一轮的 ACCEPT / REJECT 都必须同时引用：
   1. 本轮真实 NCU 报告（solution + 官方 baseline 各一份）；
   2. `skills/KernelWiki` 中与本轮瓶颈对应的页面。
+- **派生起点强制要求**：所有新轮次必须先读取数据集里的官方 baseline 源码，再从其派生新的候选代码；
+  禁止继续从旧的 rejected 自研候选直接起步。工作区 `src/official_baseline/` 视为强制参考目录。
 - **baseline NCU 复用规则**：官方 baseline 的 NCU 报告可以复用，但仅限
   `definition + batch_size + device + baseline_solution + NCU版本` 完全一致的情况；
   一旦其中任何一项变化，就必须重新采样。
@@ -52,10 +60,10 @@
 - `scripts/workflow/fib_inproc_validate.py`：**单进程**正确性+性能验证器。
   - WSL 下官方多进程 persistent runner 报 `CUDA error: invalid resource handle`（CUDA IPC
     不兼容 WSL），故绕开多进程，直接在本进程内 build reference + build solution 并逐 workload 比对。
-  - **后续 9 个算子统一用此脚本验证。**
+  - **后续主线算子统一用此脚本验证。**
 
 ### 已完成算子
-- **rmsnorm（样板，接口已通，性能未达标 → 进入闭环优化中）**
+- **rmsnorm（样板，接口已通，但已降级为非主线参考算子）**
   - kernel: `kernels/operators/rmsnorm/rmsnorm_h4096_tvmffi.cu`
     （bfloat16，bfloat162 向量化，warp + shared memory 两级归约，float32 累加）
   - solution: `flashinfer-trace/solutions/kernelforge/rmsnorm/rmsnorm_h4096/kernelforge_rmsnorm_h4096_cuda_v1.json`
@@ -65,7 +73,8 @@
     - 小 batch（1~170）只有官方 0.64~0.88；大 batch（>8000）持平 ~1.0。
   - NCU 实采（本机 5070，`profile/rmsnorm/`）：batch=16 时我的内存吞吐仅 5.70%，
     官方 35.99%；grid=16 仅占满 1/3 SM。**根因：小 batch 并行度不足 + 访存事务不紧凑。**
-  - 当前正按 NCU 结论做 Round 1（v2）优化。
+  - 当前状态：保留为官方 baseline 派生、真实 NCU 驱动的样板工程；**后续默认不再继续作为主线闭环对象**，
+    主资源转向下面 6 类高收益算子。
 
 ## 闭环优化流程（真实闭环，强制执行）
 
@@ -73,7 +82,7 @@
 全部基于本机真实数据，加速比一律用 `sol/base`。
 
 ```
-1. derive    建 rounds/round-<N>/<family>/{src,profile,docs}，从锚点变体派生
+1. derive    建 rounds/round-<N>/<family>/{src,profile,docs}，先展开官方 baseline 源码，再派生候选
 2. brief     写 BRIEF.md：本轮目标(sol/base 提升)、方向(来自上轮NCU)、要避开的 TRAPS，
              并列出本轮必须参考的 KernelWiki 页面
 3. optimize  按 NCU 结论改 kernel（禁止凭空猜方向），并记录哪些 KernelWiki 页面支持该方向
@@ -117,10 +126,12 @@ python scripts/workflow/fib_inproc_validate.py \
 
 禁止出现“只有 benchmark，没有 NCU”；也禁止出现“有 NCU，但没有 KernelWiki 依据”的轮次。
 
-### 待办（其余 9 个算子，仍是占位空壳）
-- 顺序建议：`gemm`(收益最高，数据集有现成 definition+官方CUDA对照) → `rope` → `sampling`
-  → `gqa_paged` → `moe` → `gqa_ragged` → `mla_paged` → `dsa_paged` → `gdn`。
-- 复用模板：每个算子 = 1 个 TVM-FFI kernel(`.cu`) + 1 个 solution.json + 用
-  `fib_inproc_validate.py` 验证。
-- 注意 dtype：rmsnorm 是 bfloat16；gemm 等量化算子若用到 float4/float8，需确认 torch 2.7.1
-  是否支持，否则需另想办法（不可升级 torch）。
+### 待办（主线只保留 6 类高收益算子）
+- **P0**：`dsa_sparse_attention`
+- **P0**：`gdn_prefill`
+- **P0**：`gdn_decode`
+- **P1**：`dsa_topk_indexer`
+- **P1**：`paged_attention`（`gqa_paged_decode`、`mla_paged_decode`、`mla_paged_prefill`）
+- **P1**：`moe_fp8`
+- 统一要求：每个家族都必须沿用“官方 baseline 派生 + `fib_inproc_validate.py` 验证 + 本机
+  NCU 2025.2 实采 + KernelWiki 决策支撑”的闭环流程。

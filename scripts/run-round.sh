@@ -3,6 +3,7 @@
 
 # 说明：
 # - 优先从 reference/<family>/baseline.json 读取锚点、数据集、definition、上一轮结论
+# - 所有新轮次必须从官方 baseline 源码派生；工作区会自动展开官方 baseline source
 # - 自动为本轮生成 round_config.json / BRIEF.md / draft.md
 # - 自动生成 NCU / KernelWiki 证据模板，未补齐前不得进入最终决策
 # - RTX 5070 / sm_120 的 NCU 证据只能使用 /usr/local/NVIDIA-Nsight-Compute-2025.2/ncu
@@ -73,6 +74,9 @@ defaults = {
     "op_type": family,
     "entry_symbol": "",
     "binding": "tvm-ffi",
+    "derive_from_official_baseline": True,
+    "official_baseline_source_json": "",
+    "official_baseline_source_dir": "",
 }
 
 if family == "rmsnorm":
@@ -81,21 +85,22 @@ if family == "rmsnorm":
             "dataset_path": "/mnt/d/Agent/flashinfer-trace",
             "definition": "rmsnorm_h4096",
             "baseline_solution": "flashinfer_wrapper_2e27cd",
-            "anchor": "round0-v1",
-            "anchor_kernel": str(reference_dir / "variants" / "round0-v1" / "kernel.cu"),
-            "anchor_solution": "kernelforge_rmsnorm_h4096_cuda_v1",
+            "anchor": "official-baseline-v0",
+            "anchor_kernel": str(reference_dir / "variants" / "official-baseline-v0" / "kernel.cu"),
+            "anchor_solution": "flashinfer_wrapper_2e27cd",
             "accept_threshold": 1.05,
-            "latest_sol_base": "0.893",
-            "latest_decision": "REJECT",
-            "latest_reason": "正确性通过，但 sol/base 仅 0.893x，低于 1.05x 验收线",
-            "next_direction": "优先提升小 batch 并行度，并减少低效访存事务",
-            "next_technique": "尝试多行并行或每个 CTA 处理多行，保持 bfloat16 向量化归约路径",
-            "ncu_summary": "batch=16 时我的实现内存吞吐约 5.70%，官方 baseline 约 35.99%；grid=16 仅覆盖约 1/3 SM，说明小 batch 并行度不足且访存不够紧凑。",
+            "latest_sol_base": "",
+            "latest_decision": "RESTART",
+            "latest_reason": "从官方 baseline 源码重新启动新的优化轮次",
+            "next_direction": "先基于官方 baseline 源码建立新的 CUDA 派生起点，再做真实 NCU 驱动优化",
+            "next_technique": "保持官方 baseline 语义一致，逐步做 CUDA 化与真实 profile 校验",
+            "ncu_summary": "新的轮次从官方 baseline 源码重新启动；历史旧轮次仅作为 legacy 证据，不再作为派生起点。",
             "solution_prefix": "kernelforge_rmsnorm_h4096_cuda_v",
             "author": "kernelforge",
             "op_type": "rmsnorm",
             "entry_symbol": "rmsnorm_h4096",
             "binding": "tvm-ffi",
+            "derive_from_official_baseline": True,
         }
     )
 
@@ -118,7 +123,7 @@ anchor = pick(data.get("anchor"), defaults["anchor"])
 anchor_kernel = pick(data.get("anchor_kernel"), defaults["anchor_kernel"])
 if anchor_kernel and not os.path.isabs(anchor_kernel):
     anchor_kernel = str((baseline_file.parent / anchor_kernel).resolve())
-anchor_solution = pick(data.get("solution_name"), data.get("anchor_solution"), defaults["anchor_solution"])
+anchor_solution = pick(data.get("anchor_solution"), data.get("solution_name"), defaults["anchor_solution"])
 accept_threshold = pick(data.get("accept_threshold"), defaults["accept_threshold"])
 latest_sol_base = pick(latest.get("avg_sol_vs_base"), data.get("best_sol_vs_base"), defaults["latest_sol_base"])
 latest_decision = pick(latest.get("decision"), defaults["latest_decision"])
@@ -131,6 +136,23 @@ author = pick(data.get("author"), defaults["author"])
 op_type = pick(data.get("op_type"), defaults["op_type"])
 entry_symbol = pick(data.get("entry_symbol"), defaults["entry_symbol"])
 binding = pick(data.get("binding"), defaults["binding"])
+derive_from_official_baseline = bool(
+    pick(data.get("derive_from_official_baseline"), defaults["derive_from_official_baseline"])
+)
+
+official_baseline_source_json = ""
+if dataset_path and definition and baseline_solution:
+    official_baseline_source_json = str(
+        (
+            Path(dataset_path)
+            / "solutions"
+            / "baseline"
+            / op_type
+            / definition
+            / f"{baseline_solution}.json"
+        ).resolve()
+    )
+official_baseline_source_dir = str((round_dir / "src" / "official_baseline").resolve())
 
 candidate_variant = f"round{round_id}-v1"
 candidate_solution = pick(
@@ -162,6 +184,9 @@ fields = {
     "OP_TYPE": str(op_type),
     "ENTRY_SYMBOL": str(entry_symbol),
     "BINDING": str(binding),
+    "DERIVE_FROM_OFFICIAL_BASELINE": "1" if derive_from_official_baseline else "0",
+    "OFFICIAL_BASELINE_SOURCE_JSON": str(official_baseline_source_json),
+    "OFFICIAL_BASELINE_SOURCE_DIR": str(official_baseline_source_dir),
     "CANDIDATE_VARIANT": str(candidate_variant),
     "CANDIDATE_SOLUTION": str(candidate_solution),
     "CANDIDATE_KERNEL": candidate_kernel,
@@ -179,6 +204,27 @@ PY
 # Step 1: derive (create round environment)
 echo "Step 1/10: derive (creating round environment)"
 mkdir -p "$ROUND_DIR"/{docs,src,profile}
+mkdir -p "$OFFICIAL_BASELINE_SOURCE_DIR"
+
+if [ "$DERIVE_FROM_OFFICIAL_BASELINE" = "1" ] && [ -n "$OFFICIAL_BASELINE_SOURCE_JSON" ] && [ -f "$OFFICIAL_BASELINE_SOURCE_JSON" ]; then
+    "$PYTHON_BIN" - "$OFFICIAL_BASELINE_SOURCE_JSON" "$OFFICIAL_BASELINE_SOURCE_DIR" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+src_json = Path(sys.argv[1])
+out_dir = Path(sys.argv[2])
+payload = json.loads(src_json.read_text(encoding="utf-8"))
+for source in payload.get("sources", []):
+    rel_path = Path(source["path"])
+    target = out_dir / rel_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(source["content"], encoding="utf-8")
+PY
+    echo "  ✓ Extracted official baseline source: $OFFICIAL_BASELINE_SOURCE_JSON"
+else
+    echo "  ! Official baseline source json not found: $OFFICIAL_BASELINE_SOURCE_JSON"
+fi
 
 # 复制锚点内核，baseline.cu 作为参考，kernel.cu 作为本轮可直接编辑的工作副本
 if [ -n "$ANCHOR_KERNEL" ] && [ -f "$ANCHOR_KERNEL" ]; then
@@ -214,6 +260,10 @@ cat > "$ROUND_CONFIG" <<EOF
   "op_type": "$OP_TYPE",
   "entry_symbol": "$ENTRY_SYMBOL",
   "binding": "$BINDING"
+  ,
+  "derive_from_official_baseline": $([ "$DERIVE_FROM_OFFICIAL_BASELINE" = "1" ] && echo "true" || echo "false"),
+  "official_baseline_source_json": "$OFFICIAL_BASELINE_SOURCE_JSON",
+  "official_baseline_source_dir": "$OFFICIAL_BASELINE_SOURCE_DIR"
 }
 EOF
 
@@ -262,6 +312,7 @@ $GOAL_BLOCK
 ## 上一轮证据
 - **决策原因**: ${LATEST_REASON:-暂无}
 - **NCU 摘要**: ${NCU_SUMMARY:-暂无，执行 profile 后请补充到 reference/$FAMILY/baseline.json}
+- **官方 baseline 派生规则**: 本轮必须从数据集里的官方 baseline 源码派生，参考源码位于：\`$OFFICIAL_BASELINE_SOURCE_DIR\`
 
 ## 本轮硬约束证据
 - **真实 NCU 证据文件**: \`$NCU_EVIDENCE_FILE\`
@@ -270,6 +321,7 @@ $GOAL_BLOCK
 - **规则 2**: 必须记录本轮参考的 KernelWiki 页面，并说明其为何适用于本轮
 - **规则 3**: NCU 只能使用 \`/usr/local/NVIDIA-Nsight-Compute-2025.2/ncu\`；禁止使用 \`/usr/local/cuda/bin/ncu\`
 - **规则 4**: 没有补齐这两个文件时，\`./scripts/evaluate-round.sh\` 会直接失败，不允许进入决策
+- **规则 5**: 新轮次禁止从旧的自研 rejected 候选直接派生，必须先阅读并基于官方 baseline 源码展开改动
 
 ## 约束
 - 必须使用真实 FlashInfer-Bench 数据集：\`$DATASET_PATH\`
@@ -285,6 +337,7 @@ $TRAPS_SUMMARY
 
 ## 资源
 - 参考锚点代码：\`$BASELINE_COPY\`
+- 官方 baseline 源码：\`$OFFICIAL_BASELINE_SOURCE_DIR\`
 - 当前可编辑代码：\`$CANDIDATE_KERNEL\`
 - 回写 solution 脚本：\`$ROUND_DIR/src/gen_solution.py\`
 - 本轮配置：\`$ROUND_CONFIG\`
@@ -294,7 +347,7 @@ $TRAPS_SUMMARY
 
 ## 推荐流程
 1. 阅读本文件和 \`TRAPS.md\`
-2. 在 \`src/kernel.cu\` 上改动，不要直接改 \`baseline.cu\`
+2. 先阅读 \`src/official_baseline/\` 下的官方 baseline 源码，再在 \`src/kernel.cu\` 上做派生改动
 3. 查阅 \`skills/KernelWiki\`，把本轮参考页面写入 \`docs/kernelwiki_evidence.json\`
 4. 把设计写入 \`docs/draft.md\`
 5. 运行 \`python src/gen_solution.py\` 生成候选 solution

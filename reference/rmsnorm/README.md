@@ -1,10 +1,11 @@
 # RMSNorm 优化家族
 
-本文件记录 `rmsnorm_h4096` 的真实闭环优化状态。当前已经有可验证的 Round 0 样板，
-正确性通过，但相对官方 FlashInfer baseline 仍然偏慢，因此继续作为后续轮次的锚点。
-当前已经完成 Round 1 与 Round 2 的真实闭环验证，二者都被 REJECT：
-Round 1 的三段式 split 路径失败，Round 2 的单阶段寄存器预算路径也未追平官方 baseline，
-因此继续保留 `round0-v1` 作为锚点。
+本文件记录 `rmsnorm_h4096` 的真实闭环优化状态。
+
+自 `2026-06-16` 起，本家族的**新闭环轮次重启**为：
+- **必须以官方 baseline 源码为派生起点**
+- **旧的 round0~round7 仅保留为 legacy 证据，不再作为新轮次锚点**
+- **新的 Round 1 从 `official-baseline-v0` 重新开始**
 
 ---
 
@@ -18,18 +19,16 @@ Round 1 的三段式 split 路径失败，Round 2 的单阶段寄存器预算路
 
 ---
 
-## 当前锚点变体
+## 当前锚点变体（重启后）
 
-**变体 ID**: `round0-v1`  
-**solution 名**: `kernelforge_rmsnorm_h4096_cuda_v1`  
-**当前成绩**: `sol/base = 0.893x`  
-**状态**: `REJECT，但保留为继续优化锚点`
+**变体 ID**: `official-baseline-v0`  
+**solution 名**: `flashinfer_wrapper_2e27cd`  
+**状态**: `官方 baseline 源码派生起点`
 
 **关键特性**:
-- bfloat16 输入/输出，float32 累加
-- `bfloat162` 向量化访存
-- warp + shared memory 两级归约
-- TVM-FFI DPS 接口，已接入 FlashInfer-Bench
+- `main.py` 为数据集里的官方 baseline 原始源码
+- `kernel.cu` 为对官方 baseline 语义的 CUDA 直译起点
+- 后续轮次必须先阅读该目录，再做派生
 
 **当前限制**:
 - 小 batch 时并行度不足
@@ -37,11 +36,10 @@ Round 1 的三段式 split 路径失败，Round 2 的单阶段寄存器预算路
 
 ---
 
-## 最近候选变体
+## Legacy 轮次
 
-**变体 ID**: `round2-v1`  
-**solution 名**: `kernelforge_rmsnorm_h4096_cuda_v3`  
-**状态**: `REJECT（14/14 正确，但 sol/base = 0.710x）`
+旧轮次 `round0-v1` ~ `round7-v1` 的真实验证、真实 NCU 与失败教训仍保留，
+但它们只作为经验库和反例库，不再作为新的派生起点。
 
 **代码位置**:
 - `reference/rmsnorm/variants/round2-v1/kernel.cu`
@@ -125,6 +123,12 @@ round0-v1  (validated anchor, rejected for performance)
 
 ---
 
+## 新起点规则
+
+1. 新轮次必须从 `reference/rmsnorm/variants/official-baseline-v0/` 派生
+2. 工作区必须展开 `src/official_baseline/`
+3. 禁止继续从 `round0-v1`、`round3-v1`、`round6-v1` 等 rejected 版本直接起步
+
 ## 下一轮方向
 
 1. **直接解决 batch=16 只有 16 CTA 的结构性问题**
@@ -141,7 +145,8 @@ round0-v1  (validated anchor, rejected for performance)
 - `reference/rmsnorm/baseline.json`: 当前闭环状态源
 - `reference/rmsnorm/solutions.jsonl`: 变体 DAG
 - `reference/rmsnorm/TRAPS.md`: 陷阱库
-- `reference/rmsnorm/variants/round0-v1/kernel.cu`: 当前锚点实现
+- `reference/rmsnorm/variants/official-baseline-v0/main.py`: 官方 baseline 原始源码
+- `reference/rmsnorm/variants/official-baseline-v0/kernel.cu`: 官方 baseline 语义的 CUDA 直译起点
 - `reference/rmsnorm/variants/round2-v1/kernel.cu`: Round 2 被拒候选
 
 ---

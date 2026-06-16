@@ -30,7 +30,7 @@ REQUIRED_PATHS = [
     "prompts/README.md",
     "kernels/README.md",
     "kernels/generated/all_operators.cu",
-    # FlashInfer-Bench 对齐的 10 种算子类型
+    # 当前主线聚焦的算子类型
     "kernels/operators/gemm/gemm_final.cu",
     "kernels/operators/gqa_paged/gqa_paged_final.cu",
     "kernels/operators/gqa_ragged/gqa_ragged_final.cu",

@@ -23,7 +23,7 @@ WORKFLOW_ROOT = Path(__file__).resolve().parent
 
 
 OPERATOR_SOURCES = {
-    # FlashInfer-Bench 对齐的 10 种算子类型
+    # 仓库内保留的算子源码入口；当前主线优化范围见 README / CLAUDE 规则
     "gemm": REPO_ROOT / "kernels" / "operators" / "gemm" / "gemm_final.cu",
     "gqa_paged": REPO_ROOT / "kernels" / "operators" / "gqa_paged" / "gqa_paged_final.cu",
     "gqa_ragged": REPO_ROOT / "kernels" / "operators" / "gqa_ragged" / "gqa_ragged_final.cu",

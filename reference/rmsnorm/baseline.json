@@ -9,9 +9,12 @@
   "binding": "tvm-ffi",
   "solution_prefix": "kernelforge_rmsnorm_h4096_cuda_v",
   "accept_threshold": 1.05,
-  "anchor": "round0-v1",
-  "anchor_kernel": "variants/round0-v1/kernel.cu",
-  "solution_name": "kernelforge_rmsnorm_h4096_cuda_v1",
+  "anchor": "official-baseline-v0",
+  "anchor_kernel": "variants/official-baseline-v0/kernel.cu",
+  "anchor_solution": "flashinfer_wrapper_2e27cd",
+  "solution_name": "flashinfer_wrapper_2e27cd",
+  "derive_from_official_baseline": true,
+  "campaign_restart_from_official_baseline_at": "2026-06-16T21:00:00+08:00",
   "best_sol_vs_base": 0.893,
   "pending_candidate": {
     "round": 2,
@@ -23,22 +26,22 @@
     "workflow_kernel": "kernels/operators/rmsnorm/rmsnorm_final.cu",
     "workflow_benchmark": "scripts/workflow/run_optimization_cycle.py"
   },
-  "latest_ncu_summary": "Round 2 v3 的主要瓶颈仍然是小 batch 下的 single-pass small-grid + long scoreboard stalls：batch=16 时只有 16 blocks / 0.074 waves/SM，long scoreboard 达到 16.49。; 真实验证显示 v3 在 14/14 workload 上正确，但平均 sol/base 只有 0.783x；真实 NCU 显示虽然寄存器数降到 28，但 memory throughput 仍低于官方 baseline，long scoreboard stalls 反而显著更重。",
+  "latest_ncu_summary": "Round 6 v7 已经基本解决了 Round 3 的“eligible warps 不足”问题，但新的主要差距变成 scoreboard stalls：candidate 的 eligible warps/cycle 提升到 0.228，高于 baseline 的 0.206；可同时 long_scoreboard=3.11、short_scoreboard=2.72 仍显著高于 baseline 的 1.68 / 1.18。; 真实验证显示 v7 在 14/14 workload 上正确，平均 sol/base 从 Round 3 的 0.912x 提升到 0.965x，batch=16 单点达到 1.05x；真实 NCU 说明 256-thread shared staging 的方向是对的，但平均成绩仍未达到 1.05x。",
   "next_direction": "单阶段寄存器预算已经验证无效，下一轮必须直接解决 batch=16 只有 16 CTA 的结构性并行度瓶颈，同时避免 Round 1 三段式那种额外 finalize 开销。",
   "next_technique": "下一轮优先尝试单 kernel 的多 CTA/row 设计（如原子累计 partial sum + 同核收尾，或可控的持久化工作分配），目标是在不引入独立 finalize 小 grid 的前提下把 waves/SM 明显抬高。",
   "latest_result": {
-    "round": 2,
-    "candidate_variant": "round2-v1",
-    "solution_name": "kernelforge_rmsnorm_h4096_cuda_v3",
+    "round": 6,
+    "candidate_variant": "round6-v1",
+    "solution_name": "kernelforge_rmsnorm_h4096_cuda_v7",
     "decision": "REJECT",
     "passed_workloads": 14,
     "total_workloads": 14,
-    "avg_sol_vs_ref": 6.542,
-    "avg_sol_vs_base": 0.71,
-    "ncu_summary": "Round 2 v3 的主要瓶颈仍然是小 batch 下的 single-pass small-grid + long scoreboard stalls：batch=16 时只有 16 blocks / 0.074 waves/SM，long scoreboard 达到 16.49。; 真实验证显示 v3 在 14/14 workload 上正确，但平均 sol/base 只有 0.783x；真实 NCU 显示虽然寄存器数降到 28，但 memory throughput 仍低于官方 baseline，long scoreboard stalls 反而显著更重。",
+    "avg_sol_vs_ref": 6.49,
+    "avg_sol_vs_base": 0.994,
+    "ncu_summary": "Round 6 v7 已经基本解决了 Round 3 的“eligible warps 不足”问题，但新的主要差距变成 scoreboard stalls：candidate 的 eligible warps/cycle 提升到 0.228，高于 baseline 的 0.206；可同时 long_scoreboard=3.11、short_scoreboard=2.72 仍显著高于 baseline 的 1.68 / 1.18。; 真实验证显示 v7 在 14/14 workload 上正确，平均 sol/base 从 Round 3 的 0.912x 提升到 0.965x，batch=16 单点达到 1.05x；真实 NCU 说明 256-thread shared staging 的方向是对的，但平均成绩仍未达到 1.05x。",
     "kernelwiki_primary_page": "skills/KernelWiki/wiki/patterns/low-sm-utilization.md",
-    "reason": "sol/base = 0.710x，低于 1.05x 验收线",
-    "evaluated_at": "2026-06-16T18:46:21+08:00"
+    "reason": "sol/base = 0.994x，低于 1.05x 验收线",
+    "evaluated_at": "2026-06-16T20:05:50+08:00"
   },
-  "updated_at": "2026-06-16T18:46:21.487294"
+  "updated_at": "2026-06-16T20:05:50.728970"
 }

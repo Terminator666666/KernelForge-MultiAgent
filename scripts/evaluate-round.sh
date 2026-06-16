@@ -127,6 +127,22 @@ if not kernelwiki_file.exists():
 ncu = json.loads(ncu_file.read_text(encoding='utf-8'))
 kernelwiki = json.loads(kernelwiki_file.read_text(encoding='utf-8'))
 
+if round_cfg.get("derive_from_official_baseline") is True:
+    baseline_src_json_raw = str(round_cfg.get("official_baseline_source_json", "")).strip()
+    baseline_src_dir_raw = str(round_cfg.get("official_baseline_source_dir", "")).strip()
+    if not baseline_src_json_raw:
+        fail("Error: round_config.json 缺少 official_baseline_source_json")
+    if not baseline_src_dir_raw:
+        fail("Error: round_config.json 缺少 official_baseline_source_dir")
+    baseline_src_json = resolve_path(baseline_src_json_raw)
+    baseline_src_dir = resolve_path(baseline_src_dir_raw)
+    if not baseline_src_json.exists():
+        fail(f"Error: official baseline source json not found: {baseline_src_json}")
+    if not baseline_src_dir.exists():
+        fail(f"Error: official baseline source dir not found: {baseline_src_dir}")
+    if not any(p.is_file() for p in baseline_src_dir.rglob("*")):
+        fail(f"Error: official baseline source dir is empty: {baseline_src_dir}")
+
 if ncu.get("status") != "COMPLETE":
     fail("Error: NCU evidence status 必须为 COMPLETE")
 if kernelwiki.get("status") != "COMPLETE":
@@ -221,6 +237,9 @@ PY
 echo "  ✓ NCU evidence    : $NCU_EVIDENCE_FILE"
 echo "  ✓ NCU binary      : $NCU_REQUIRED_BINARY"
 echo "  ✓ KernelWiki refs : $KERNELWIKI_EVIDENCE_FILE"
+if [ "${DERIVE_FROM_OFFICIAL_BASELINE:-}" = "1" ]; then
+  echo "  ✓ Baseline derive  : official baseline source extracted"
+fi
 echo "  ✓ NCU bottleneck  : $NCU_BOTTLENECK"
 echo "  ✓ Decision driver : $NCU_DECISION_DRIVER"
 echo ""
