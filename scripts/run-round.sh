@@ -4,6 +4,7 @@
 # 说明：
 # - 优先从 reference/<family>/baseline.json 读取锚点、数据集、definition、上一轮结论
 # - 自动为本轮生成 round_config.json / BRIEF.md / draft.md
+# - 自动生成 NCU / KernelWiki 证据模板，未补齐前不得进入最终决策
 # - 对 rmsnorm 额外生成 src/gen_solution.py，方便把当前 kernel.cu 写回 flashinfer-trace
 # - 不执行 benchmark / validate，只准备好本轮工作区
 
@@ -137,6 +138,8 @@ candidate_solution = pick(
 )
 candidate_kernel = str((round_dir / "src" / "kernel.cu").resolve())
 baseline_copy = str((round_dir / "src" / "baseline.cu").resolve())
+ncu_evidence_file = str((round_dir / "profile" / "ncu_evidence.json").resolve())
+kernelwiki_evidence_file = str((round_dir / "docs" / "kernelwiki_evidence.json").resolve())
 bootstrap = "1" if (round_id == 0 and latest_decision == "") else "0"
 
 fields = {
@@ -162,6 +165,8 @@ fields = {
     "CANDIDATE_SOLUTION": str(candidate_solution),
     "CANDIDATE_KERNEL": candidate_kernel,
     "BASELINE_COPY": baseline_copy,
+    "NCU_EVIDENCE_FILE": ncu_evidence_file,
+    "KERNELWIKI_EVIDENCE_FILE": kernelwiki_evidence_file,
     "BOOTSTRAP_MODE": bootstrap,
 }
 
@@ -199,6 +204,10 @@ cat > "$ROUND_CONFIG" <<EOF
   "candidate_variant": "$CANDIDATE_VARIANT",
   "candidate_solution": "$CANDIDATE_SOLUTION",
   "candidate_kernel": "$CANDIDATE_KERNEL",
+  "ncu_evidence_file": "$NCU_EVIDENCE_FILE",
+  "kernelwiki_evidence_file": "$KERNELWIKI_EVIDENCE_FILE",
+  "requires_ncu_evidence": true,
+  "requires_kernelwiki_evidence": true,
   "accept_threshold": $ACCEPT_THRESHOLD,
   "author": "$AUTHOR",
   "op_type": "$OP_TYPE",
@@ -253,12 +262,21 @@ $GOAL_BLOCK
 - **决策原因**: ${LATEST_REASON:-暂无}
 - **NCU 摘要**: ${NCU_SUMMARY:-暂无，执行 profile 后请补充到 reference/$FAMILY/baseline.json}
 
+## 本轮硬约束证据
+- **真实 NCU 证据文件**: \`$NCU_EVIDENCE_FILE\`
+- **KernelWiki 依据文件**: \`$KERNELWIKI_EVIDENCE_FILE\`
+- **规则 1**: 必须同时填写 solution 与官方 baseline 的真实 NCU 报告
+- **规则 2**: 必须记录本轮参考的 KernelWiki 页面，并说明其为何适用于本轮
+- **规则 3**: 没有补齐这两个文件时，\`./scripts/evaluate-round.sh\` 会直接失败，不允许进入决策
+
 ## 约束
 - 必须使用真实 FlashInfer-Bench 数据集：\`$DATASET_PATH\`
 - definition 固定为：\`$DEFINITION\`
 - 官方 baseline 固定为：\`$BASELINE_SOLUTION\`
 - 正确性不过即 REJECT
 - 成绩只认 \`sol/base\`
+- RTX 5070 / sm_120 属于 Blackwell，必须参考 \`skills/KernelWiki\`
+- 对仅适用于 SM100/B200 的特性，必须在 KernelWiki 依据文件中明确标注“不适用于 sm_120”
 
 ## 需要规避的陷阱
 $TRAPS_SUMMARY
@@ -268,15 +286,19 @@ $TRAPS_SUMMARY
 - 当前可编辑代码：\`$CANDIDATE_KERNEL\`
 - 回写 solution 脚本：\`$ROUND_DIR/src/gen_solution.py\`
 - 本轮配置：\`$ROUND_CONFIG\`
+- NCU 证据模板：\`$NCU_EVIDENCE_FILE\`
+- KernelWiki 证据模板：\`$KERNELWIKI_EVIDENCE_FILE\`
 - 历史陷阱：\`$REFERENCE_DIR/TRAPS.md\`
 
 ## 推荐流程
 1. 阅读本文件和 \`TRAPS.md\`
 2. 在 \`src/kernel.cu\` 上改动，不要直接改 \`baseline.cu\`
-3. 把设计写入 \`docs/draft.md\`
-4. 运行 \`python src/gen_solution.py\` 生成候选 solution
-5. 回到仓库根目录执行 \`./scripts/evaluate-round.sh $FAMILY $ROUND\`
-6. 如果需要新的优化方向，补做 NCU 并把结论写回 \`reference/$FAMILY/baseline.json\`
+3. 查阅 \`skills/KernelWiki\`，把本轮参考页面写入 \`docs/kernelwiki_evidence.json\`
+4. 把设计写入 \`docs/draft.md\`
+5. 运行 \`python src/gen_solution.py\` 生成候选 solution
+6. 分别对 candidate / baseline 做真实 NCU，并填写 \`profile/ncu_evidence.json\`
+7. 回到仓库根目录执行 \`./scripts/evaluate-round.sh $FAMILY $ROUND\`
+8. 如果需要新的优化方向，补做 NCU 并把结论写回 \`reference/$FAMILY/baseline.json\`
 
 ---
 
@@ -284,6 +306,93 @@ Generated: $(date -Iseconds)
 EOF
 
 echo "  ✓ BRIEF.md generated at: $ROUND_DIR/BRIEF.md"
+
+if [ ! -f "$NCU_EVIDENCE_FILE" ]; then
+cat > "$NCU_EVIDENCE_FILE" <<EOF
+{
+  "required": true,
+  "status": "PENDING",
+  "round": $ROUND,
+  "family": "$FAMILY",
+  "definition": "$DEFINITION",
+  "device": "RTX 5070 Laptop / sm_120",
+  "collected_at": "",
+  "solution_profile": {
+    "kernel_or_solution": "$CANDIDATE_SOLUTION",
+    "report_path": "",
+    "command": "",
+    "batch_size": "",
+    "workload": "",
+    "key_metrics": [],
+    "key_findings": []
+  },
+  "baseline_profile": {
+    "kernel_or_solution": "$BASELINE_SOLUTION",
+    "report_path": "",
+    "command": "",
+    "batch_size": "",
+    "workload": "",
+    "key_metrics": [],
+    "key_findings": []
+  },
+  "comparison_summary": {
+    "bottleneck": "",
+    "decision_driver": "",
+    "why_this_round": ""
+  }
+}
+EOF
+echo "  ✓ NCU evidence template created"
+else
+    echo "  ✓ NCU evidence template already exists, kept as-is"
+fi
+
+if [ ! -f "$KERNELWIKI_EVIDENCE_FILE" ]; then
+cat > "$KERNELWIKI_EVIDENCE_FILE" <<EOF
+{
+  "required": true,
+  "status": "PENDING",
+  "round": $ROUND,
+  "family": "$FAMILY",
+  "architecture": "sm_120",
+  "reviewed_at": "",
+  "pages": [
+    {
+      "path": "skills/KernelWiki/wiki/patterns/low-sm-utilization.md",
+      "id": "pattern-low-sm-utilization",
+      "reason": "",
+      "how_it_guides_this_round": "",
+      "applicable_to_sm120": true
+    },
+    {
+      "path": "skills/KernelWiki/wiki/patterns/memory-bound.md",
+      "id": "pattern-memory-bound",
+      "reason": "",
+      "how_it_guides_this_round": "",
+      "applicable_to_sm120": true
+    },
+    {
+      "path": "skills/KernelWiki/wiki/techniques/vectorized-loads.md",
+      "id": "technique-vectorized-loads",
+      "reason": "",
+      "how_it_guides_this_round": "",
+      "applicable_to_sm120": true
+    },
+    {
+      "path": "skills/KernelWiki/wiki/techniques/register-budgeting.md",
+      "id": "technique-register-budgeting",
+      "reason": "",
+      "how_it_guides_this_round": "",
+      "applicable_to_sm120": true
+    }
+  ],
+  "decision_notes": ""
+}
+EOF
+echo "  ✓ KernelWiki evidence template created"
+else
+    echo "  ✓ KernelWiki evidence template already exists, kept as-is"
+fi
 
 if [ -f "$PROJECT_ROOT/docs/draft_template.md" ]; then
     cp "$PROJECT_ROOT/docs/draft_template.md" "$ROUND_DIR/docs/draft.md"
@@ -364,12 +473,18 @@ echo ""
 echo "3. Edit draft.md:"
 echo "   vim $ROUND_DIR/docs/draft.md"
 echo ""
-echo "4. Generate solution after editing kernel.cu:"
+echo "4. Fill KernelWiki evidence:"
+echo "   vim $KERNELWIKI_EVIDENCE_FILE"
+echo ""
+echo "5. Generate solution after editing kernel.cu:"
 echo "   python $ROUND_DIR/src/gen_solution.py"
 echo ""
-echo "5. Evaluate automatically:"
+echo "6. Run real NCU for candidate and baseline, then fill:"
+echo "   vim $NCU_EVIDENCE_FILE"
+echo ""
+echo "7. Evaluate automatically:"
 echo "   ./scripts/evaluate-round.sh $FAMILY $ROUND"
 echo ""
-echo "6. If rejected, run NCU and update reference/$FAMILY/baseline.json with new findings"
+echo "8. If rejected, update reference/$FAMILY/baseline.json with new NCU findings"
 echo ""
 echo "=========================================="

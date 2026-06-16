@@ -6,6 +6,7 @@
 # - 调用 fib_inproc_validate.py 做真实正确性与 sol/base 评估
 # - 自动写入 decision.json，并把最新结果回写到 reference/<family>/baseline.json
 # - 对 ACCEPT 的候选自动归档到 reference/<family>/variants/<candidate>/
+# - 严格要求：没有本轮真实 NCU 证据和 KernelWiki 依据，不允许进入决策
 
 set -euo pipefail
 
@@ -71,6 +72,8 @@ fields = {
     "CANDIDATE_VARIANT": pick(round_cfg.get("candidate_variant"), f"round{round_cfg.get('round', 0)}-v1"),
     "CANDIDATE_KERNEL": pick(round_cfg.get("candidate_kernel")),
     "ANCHOR_VARIANT": pick(round_cfg.get("anchor_variant"), baseline.get("anchor")),
+    "NCU_EVIDENCE_FILE": pick(round_cfg.get("ncu_evidence_file")),
+    "KERNELWIKI_EVIDENCE_FILE": pick(round_cfg.get("kernelwiki_evidence_file")),
     "ACCEPT_THRESHOLD": str(pick(round_cfg.get("accept_threshold"), baseline.get("accept_threshold"), 1.05)),
 }
 
@@ -85,6 +88,126 @@ for required_name in DATASET_PATH DEFINITION BASELINE_SOLUTION CANDIDATE_SOLUTIO
         exit 1
     fi
 done
+
+echo "Step 0/10: validating NCU + KernelWiki evidence"
+eval "$("$PYTHON_BIN" - "$PROJECT_ROOT" "$ROUND_DIR" "$ROUND_CONFIG" <<'PY'
+import json
+import shlex
+import sys
+from pathlib import Path
+
+project_root = Path(sys.argv[1])
+round_dir = Path(sys.argv[2])
+round_cfg = json.loads(Path(sys.argv[3]).read_text(encoding="utf-8"))
+
+def fail(message: str) -> None:
+    print(message, file=sys.stderr)
+    raise SystemExit(1)
+
+def resolve_path(raw: str) -> Path:
+    path = Path(raw)
+    if path.is_absolute():
+        return path
+    return (project_root / path).resolve()
+
+ncu_file_raw = round_cfg.get("ncu_evidence_file", "")
+kernelwiki_file_raw = round_cfg.get("kernelwiki_evidence_file", "")
+if not ncu_file_raw:
+    fail("Error: round_config.json 缺少 ncu_evidence_file")
+if not kernelwiki_file_raw:
+    fail("Error: round_config.json 缺少 kernelwiki_evidence_file")
+
+ncu_file = resolve_path(ncu_file_raw)
+kernelwiki_file = resolve_path(kernelwiki_file_raw)
+if not ncu_file.exists():
+    fail(f"Error: NCU evidence file not found: {ncu_file}")
+if not kernelwiki_file.exists():
+    fail(f"Error: KernelWiki evidence file not found: {kernelwiki_file}")
+
+ncu = json.loads(ncu_file.read_text(encoding='utf-8'))
+kernelwiki = json.loads(kernelwiki_file.read_text(encoding='utf-8'))
+
+if ncu.get("status") != "COMPLETE":
+    fail("Error: NCU evidence status 必须为 COMPLETE")
+if kernelwiki.get("status") != "COMPLETE":
+    fail("Error: KernelWiki evidence status 必须为 COMPLETE")
+
+solution_profile = ncu.get("solution_profile") or {}
+baseline_profile = ncu.get("baseline_profile") or {}
+comparison_summary = ncu.get("comparison_summary") or {}
+
+for label, profile in (("solution", solution_profile), ("baseline", baseline_profile)):
+    report_path_raw = str(profile.get("report_path", "")).strip()
+    command = str(profile.get("command", "")).strip()
+    if not report_path_raw:
+        fail(f"Error: NCU evidence 缺少 {label} report_path")
+    if not command:
+        fail(f"Error: NCU evidence 缺少 {label} command")
+    report_path = Path(report_path_raw)
+    if not report_path.is_absolute():
+        report_path = (round_dir / report_path).resolve()
+    if not report_path.exists():
+        fail(f"Error: NCU report file not found for {label}: {report_path}")
+
+bottleneck = str(comparison_summary.get("bottleneck", "")).strip()
+decision_driver = str(comparison_summary.get("decision_driver", "")).strip()
+why_this_round = str(comparison_summary.get("why_this_round", "")).strip()
+if not bottleneck:
+    fail("Error: NCU evidence comparison_summary.bottleneck 不能为空")
+if not decision_driver:
+    fail("Error: NCU evidence comparison_summary.decision_driver 不能为空")
+if not why_this_round:
+    fail("Error: NCU evidence comparison_summary.why_this_round 不能为空")
+
+pages = kernelwiki.get("pages") or []
+if not pages:
+    fail("Error: KernelWiki evidence.pages 不能为空")
+
+applicable_pages = 0
+primary_page = ""
+for idx, page in enumerate(pages):
+    path_raw = str(page.get("path", "")).strip()
+    page_id = str(page.get("id", "")).strip()
+    reason = str(page.get("reason", "")).strip()
+    guide = str(page.get("how_it_guides_this_round", "")).strip()
+    if not path_raw or not page_id:
+        fail(f"Error: KernelWiki evidence.pages[{idx}] 缺少 path 或 id")
+    page_path = resolve_path(path_raw)
+    if not page_path.exists():
+        fail(f"Error: KernelWiki page not found: {page_path}")
+    if not reason:
+        fail(f"Error: KernelWiki evidence.pages[{idx}].reason 不能为空")
+    if not guide:
+        fail(f"Error: KernelWiki evidence.pages[{idx}].how_it_guides_this_round 不能为空")
+    if page.get("applicable_to_sm120") is True:
+        applicable_pages += 1
+        if not primary_page:
+            primary_page = path_raw
+
+decision_notes = str(kernelwiki.get("decision_notes", "")).strip()
+if not decision_notes:
+    fail("Error: KernelWiki evidence.decision_notes 不能为空")
+if applicable_pages <= 0:
+    fail("Error: KernelWiki evidence 至少要有一个页面标注 applicable_to_sm120=true")
+
+fields = {
+    "NCU_EVIDENCE_FILE": str(ncu_file),
+    "KERNELWIKI_EVIDENCE_FILE": str(kernelwiki_file),
+    "NCU_BOTTLENECK": bottleneck,
+    "NCU_DECISION_DRIVER": decision_driver,
+    "KERNELWIKI_PAGE_COUNT": str(len(pages)),
+    "KERNELWIKI_PRIMARY_PAGE": primary_page,
+}
+
+for key, value in fields.items():
+    print(f"{key}={shlex.quote(str(value))}")
+PY
+)"
+echo "  ✓ NCU evidence    : $NCU_EVIDENCE_FILE"
+echo "  ✓ KernelWiki refs : $KERNELWIKI_EVIDENCE_FILE"
+echo "  ✓ NCU bottleneck  : $NCU_BOTTLENECK"
+echo "  ✓ Decision driver : $NCU_DECISION_DRIVER"
+echo ""
 
 # Step 4-6: benchmark + validate + compare
 echo "Step 4-6/10: benchmark + validate + compare"
@@ -182,6 +305,12 @@ cat > "$ROUND_DIR/decision.json" <<EOF
   "avg_sol_vs_base": ${SOL_VS_BASE:-null},
   "correctness": $CORRECTNESS,
   "reason": "$REASON",
+  "ncu_evidence_file": "$NCU_EVIDENCE_FILE",
+  "kernelwiki_evidence_file": "$KERNELWIKI_EVIDENCE_FILE",
+  "ncu_bottleneck": "$NCU_BOTTLENECK",
+  "ncu_decision_driver": "$NCU_DECISION_DRIVER",
+  "kernelwiki_page_count": ${KERNELWIKI_PAGE_COUNT:-0},
+  "kernelwiki_primary_page": "$KERNELWIKI_PRIMARY_PAGE",
   "validate_log": "$VALIDATE_LOG",
   "timestamp": "$(date -Iseconds)"
 }
@@ -229,9 +358,13 @@ baseline["latest_result"] = {
     "total_workloads": decision["total_workloads"],
     "avg_sol_vs_ref": decision["avg_sol_vs_ref"],
     "avg_sol_vs_base": decision["avg_sol_vs_base"],
+    "ncu_summary": f"{decision.get('ncu_bottleneck', '')}; {decision.get('ncu_decision_driver', '')}".strip("; "),
+    "kernelwiki_primary_page": decision.get("kernelwiki_primary_page", ""),
     "reason": decision["reason"],
     "evaluated_at": decision["timestamp"],
 }
+
+baseline["latest_ncu_summary"] = baseline["latest_result"]["ncu_summary"]
 
 baseline["updated_at"] = datetime.now().isoformat()
 
@@ -255,7 +388,7 @@ entry = {
     "sol_vs_ref": decision["avg_sol_vs_ref"],
     "sol_vs_base": decision["avg_sol_vs_base"],
     "decision": decision["decision"],
-    "description": decision["reason"],
+    "description": f"{decision['reason']} | NCU: {decision.get('ncu_decision_driver', '')} | KernelWiki: {decision.get('kernelwiki_primary_page', '')}",
     "timestamp": decision["timestamp"],
 }
 

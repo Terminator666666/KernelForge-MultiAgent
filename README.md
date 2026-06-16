@@ -161,8 +161,8 @@ KernelForge-MultiAgent/
 
 ## 🔄 真实闭环迭代流程（强制执行）
 
-本项目的闭环**不是「写一版 kernel 就报个数」**，而是 **NCU 真实硬件数据驱动的多轮迭代**。
-每一轮都必须基于本机 GPU 实采数据决策，不允许凭空猜测优化方向，也不允许用虚的加速比口径。
+本项目的闭环**不是「写一版 kernel 就报个数」**，而是 **NCU 真实硬件数据驱动 + KernelWiki 证据约束**
+的多轮迭代。每一轮都必须基于本机 GPU 实采数据决策，不允许凭空猜测优化方向，也不允许用虚的加速比口径。
 
 ### 三条铁律
 
@@ -170,22 +170,26 @@ KernelForge-MultiAgent/
    vs 朴素 PyTorch 参考实现（`sol/ref`）的加速比**没有意义**，仅作正确性旁证，不作为成绩。
 2. **优化方向必须来自 NCU**：每一轮改 kernel 前，必须先在本机用 Nsight Compute 采集
    我的 kernel 与官方 baseline 的真实指标，定位瓶颈后再动手。禁止拍脑袋优化。
-3. **证据驱动 ACCEPT/REJECT**：正确性不过 → REJECT；`sol/base < 1.05` → REJECT/继续迭代；
-   `sol/base ≥ 1.05` 且正确 → ACCEPT 并归档。
+3. **决策必须参考 KernelWiki**：每一轮做 ACCEPT / REJECT 决策前，必须记录并引用
+   `skills/KernelWiki` 中与当前瓶颈匹配的页面，说明这些页面如何支撑本轮优化方向。RTX 5070 属于
+   Blackwell 架构，因此必须使用 KernelWiki；但对仅限 SM100/B200 的特性要明确标注“不适用于 sm_120”。
+4. **证据驱动 ACCEPT/REJECT**：正确性不过 → REJECT；`sol/base < 1.05` → REJECT/继续迭代；
+   `sol/base ≥ 1.05` 且正确，并且本轮 NCU + KernelWiki 证据齐全 → ACCEPT 并归档。
 
 ### 10 步循环
 
 ```
 1. derive    建 rounds/round-<N>/<family>/{src,profile,docs}，从当前锚点变体派生
-2. brief     写 BRIEF.md：本轮目标(sol/base 提升幅度)、优化方向(来自上一轮 NCU)、要避开的 TRAPS
-3. optimize  按 NCU 结论修改 kernel（方向必须有 NCU 依据）
+2. brief     写 BRIEF.md：本轮目标(sol/base 提升幅度)、优化方向(来自上一轮 NCU)、要避开的 TRAPS，
+             并列出本轮必须参考的 KernelWiki 页面
+3. optimize  按 NCU 结论修改 kernel（方向必须有 NCU 依据），同时在工作区记录对应的 KernelWiki 依据
 4. benchmark scripts/workflow/fib_inproc_validate.py 在本机 5070 计时
 5. validate  同脚本逐 workload 正确性比对（atol/rtol=1e-2），不过即 REJECT
 6. compare   以官方 baseline 为锚点计算 sol/base —— 唯一成绩口径
-7. decide    REJECT / ACCEPT（见上「铁律 3」）
+7. decide    只有在“本轮真实 NCU 证据 + KernelWiki 依据”齐全时才允许 REJECT / ACCEPT
 8. document  仅 ACCEPT 才更新 reference/<family>/（README + solutions.jsonl + variants/）
 9. lessons   把失败教训写入 reference/<family>/TRAPS.md（下一轮 brief 自动注入，避免重复踩坑）
-10. plan     用本轮 NCU 数据定位新瓶颈，规划下一轮优化方向；回到第 1 步
+10. plan     用本轮 NCU 数据 + KernelWiki 页面定位新瓶颈，规划下一轮优化方向；回到第 1 步
 ```
 
 终止条件：`sol/base ≥ 1.05`（收敛 ACCEPT）/ 连续 3 轮无改进 / 达到轮次上限。
@@ -206,6 +210,19 @@ python scripts/workflow/fib_inproc_validate.py \
   --dataset /mnt/d/Agent/flashinfer-trace --definition rmsnorm_h4096 \
   --solution <我的 solution 名> --batch-size <N> --which sol
 ```
+
+### 每轮评估前必须补齐的证据文件
+
+从现在开始，每个轮次目录都必须有下面两个文件，否则 `./scripts/evaluate-round.sh` 会直接失败：
+
+1. `rounds/round-<N>/<family>/profile/ncu_evidence.json`
+   - 记录本轮 solution 的真实 NCU 报告
+   - 记录官方 baseline 的真实 NCU 报告
+   - 写明本轮瓶颈、关键指标、决策驱动因素
+2. `rounds/round-<N>/<family>/docs/kernelwiki_evidence.json`
+   - 记录本轮参考的 `skills/KernelWiki` 页面
+   - 说明这些页面如何支持本轮优化方向
+   - 标注哪些结论适用于 `sm_120`
 
 > 注：本机为 WSL2 + RTX 5070(sm_120)。WSL 不支持 CUDA IPC，故用单进程验证器
 > `fib_inproc_validate.py` 替代官方多进程 runner；NCU 需用 Nsight Compute 2025.2
@@ -350,6 +367,7 @@ flashinfer-bench run --local flashinfer-trace --op-type <family>
 - 位置: `skills/KernelWiki/`
 - 规模: 2179 PRs, 48 wiki 页面
 - 覆盖: Blackwell/Hopper, TMA, TMEM, tcgen05, FP8
+- 用法要求：每一轮闭环都必须在工作区记录本轮实际参考的页面与适用性判断，不能只“看过不记”
 
 ### ncu-report-skill ⭐⭐⭐⭐⭐
 **性能分析**

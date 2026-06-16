@@ -5,6 +5,8 @@
 - Use `verify.py` for release-layout checks and smoke testing.
 - Treat `skills/KernelWiki` and `skills/ncu-report-skill` as required local
   skills for Blackwell/B200 optimization and Nsight Compute analysis.
+- **执行环境规则**：禁止在 Windows 主环境运行代码；但如果当前在 WSL / Linux 环境，
+  则允许执行构建、验证、benchmark、Nsight Compute profile，并以真实运行结果作为闭环证据。
 - **Supported operators**: 10 types aligned with FlashInfer-Bench - `gemm`, 
   `gqa_paged`, `gqa_ragged`, `mla_paged`, `dsa_paged`, `moe`, `rmsnorm`, `rope`, 
   `sampling`, `gdn`. See `docs/SUPPORTED_OPERATORS.md` for details.
@@ -17,6 +19,14 @@
   「vs 参考实现 PyTorch」的加速比（`sol/ref`）只能用于确认正确性，**不得**作为成绩，
   因为打过朴素 PyTorch 对带宽瓶颈算子毫无含金量。
 - **闭环强制要求**：每一轮优化必须有本机真实 NCU 数据驱动，禁止凭空猜测优化方向。
+- **决策依据强制要求**：每一轮的 ACCEPT / REJECT 都必须同时引用：
+  1. 本轮真实 NCU 报告（solution + 官方 baseline 各一份）；
+  2. `skills/KernelWiki` 中与本轮瓶颈对应的页面。
+- **KernelWiki 使用规则**：RTX 5070 / sm_120 属于 Blackwell 架构，因此每轮都必须先查
+  `skills/KernelWiki` 再定方向；但要明确区分 **可迁移模式**（如 low-sm-utilization、
+  memory-bound、vectorized-loads、register-budgeting）与 **仅限 SM100/B200 的特性**
+  （如 CLC、部分 TMEM/tcgen05 持久化路径），禁止把只适用于数据中心 Blackwell 的结论
+  直接照搬到 sm_120。
 
 ---
 
@@ -58,15 +68,17 @@
 
 ```
 1. derive    建 rounds/round-<N>/<family>/{src,profile,docs}，从锚点变体派生
-2. brief     写 BRIEF.md：本轮目标(sol/base 提升)、方向(来自上轮NCU)、要避开的 TRAPS
-3. optimize  按 NCU 结论改 kernel（禁止凭空猜方向）
+2. brief     写 BRIEF.md：本轮目标(sol/base 提升)、方向(来自上轮NCU)、要避开的 TRAPS，
+             并列出本轮必须参考的 KernelWiki 页面
+3. optimize  按 NCU 结论改 kernel（禁止凭空猜方向），并记录哪些 KernelWiki 页面支持该方向
 4. benchmark fib_inproc_validate.py 计时（本机 5070，CUDA events）
 5. validate  同脚本逐 workload 正确性比对（atol/rtol=1e-2），不过则 REJECT
 6. compare   以官方 baseline 为锚点算 sol/base（唯一成绩口径）
-7. decide    正确性失败 → REJECT；sol/base ≥ 1.05 → ACCEPT；否则 REJECT/继续
+7. decide    只有在“本轮真实 NCU 证据 + KernelWiki 依据”都完整时才允许做决策；
+             正确性失败 → REJECT；sol/base ≥ 1.05 → ACCEPT；否则 REJECT/继续
 8. document  ACCEPT 才更新 reference/<family>/（README + solutions.jsonl + variants/）
 9. lessons   失败教训写 reference/<family>/TRAPS.md（下一轮 brief 自动注入）
-10. plan     用本轮 NCU 定位新瓶颈，规划下一轮方向；回到 1
+10. plan     用本轮 NCU + KernelWiki 定位新瓶颈，规划下一轮方向；回到 1
 ```
 
 终止条件：sol/base ≥ 1.05（ACCEPT 收敛）/ 连续 3 轮无改进 / 轮次上限。
@@ -84,6 +96,20 @@ python scripts/workflow/fib_inproc_validate.py \
 /usr/local/NVIDIA-Nsight-Compute-2025.2/ncu -f -o profile/<family>/sol_bs<N> \
   --set full <python绝对路径> scripts/workflow/ncu_driver.py ... --which sol --batch-size <N>
 ```
+
+### 本轮决策前必须补齐的证据文件
+
+每一轮工作区都必须补齐下面两个文件，否则 `./scripts/evaluate-round.sh` 会直接拒绝进入决策：
+
+1. `rounds/round-<N>/<family>/profile/ncu_evidence.json`
+   - 必须填写本轮 **solution** 与 **官方 baseline** 的真实 NCU 报告路径
+   - 必须写明本轮瓶颈、决策驱动因素、为何产生当前优化方向
+2. `rounds/round-<N>/<family>/docs/kernelwiki_evidence.json`
+   - 必须列出本轮实际参考的 `skills/KernelWiki` 页面
+   - 必须写明这些页面如何支撑本轮决策
+   - 必须标注这些结论是否适用于 `sm_120`
+
+禁止出现“只有 benchmark，没有 NCU”；也禁止出现“有 NCU，但没有 KernelWiki 依据”的轮次。
 
 ### 待办（其余 9 个算子，仍是占位空壳）
 - 顺序建议：`gemm`(收益最高，数据集有现成 definition+官方CUDA对照) → `rope` → `sampling`
