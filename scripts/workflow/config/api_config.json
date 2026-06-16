@@ -1,0 +1,9 @@
+{
+  "api_key": "sk-NFYupUiMmXVwiZg8dkoQi40kHq4ibmB3T6qt2NgCVFW2ZX6O",
+  "base_url": "https://sakura886.site/",
+  "model": "claude-opus-4-8",
+  "_comment": "Replace these values locally. Do not commit real secrets.",
+  "timeout": 120,
+  "max_retries": 3,
+  "temperature": 0.7
+}

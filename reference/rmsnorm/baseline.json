@@ -1,0 +1,42 @@
+{
+  "family": "rmsnorm",
+  "dataset_path": "/mnt/d/Agent/flashinfer-trace",
+  "definition": "rmsnorm_h4096",
+  "baseline_solution": "flashinfer_wrapper_2e27cd",
+  "author": "kernelforge",
+  "op_type": "rmsnorm",
+  "entry_symbol": "rmsnorm_h4096",
+  "binding": "tvm-ffi",
+  "solution_prefix": "kernelforge_rmsnorm_h4096_cuda_v",
+  "accept_threshold": 1.05,
+  "anchor": "round0-v1",
+  "anchor_kernel": "variants/round0-v1/kernel.cu",
+  "solution_name": "kernelforge_rmsnorm_h4096_cuda_v1",
+  "best_sol_vs_base": 0.893,
+  "pending_candidate": {
+    "round": 1,
+    "candidate_variant": "round1-v2",
+    "solution_name": "kernelforge_rmsnorm_h4096_cuda_v2",
+    "kernel_file": "kernels/operators/rmsnorm/rmsnorm_h4096_tvmffi.cu",
+    "status": "PENDING_VALIDATION",
+    "direction": "小 batch 分裂并行 + 多阶段归约",
+    "workflow_kernel": "kernels/operators/rmsnorm/rmsnorm_final.cu",
+    "workflow_benchmark": "scripts/workflow/run_optimization_cycle.py"
+  },
+  "latest_ncu_summary": "batch=16 时我的实现内存吞吐约 5.70%，官方 baseline 约 35.99%；grid=16 仅覆盖约 1/3 SM，说明小 batch 并行度不足且访存事务不够紧凑。",
+  "next_direction": "优先提升小 batch 并行度，并减少低效访存事务。",
+  "next_technique": "优先验证当前分裂并行候选；若收益不足，再尝试多行并行或更紧凑的 apply 阶段调度，同时保持 bfloat16 向量化与两级归约路径。",
+  "latest_result": {
+    "round": 0,
+    "candidate_variant": "round0-v1",
+    "solution_name": "kernelforge_rmsnorm_h4096_cuda_v1",
+    "decision": "REJECT",
+    "passed_workloads": 14,
+    "total_workloads": 14,
+    "avg_sol_vs_ref": null,
+    "avg_sol_vs_base": 0.893,
+    "reason": "正确性已通过，但 sol/base 仅 0.893x，低于 1.05x 验收线。",
+    "evaluated_at": "2026-06-16T00:00:00+08:00"
+  },
+  "updated_at": "2026-06-16T00:00:00+08:00"
+}

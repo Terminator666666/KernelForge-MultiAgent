@@ -1,0 +1,143 @@
+# KernelForge-MultiAgent default configuration.
+
+[general]
+project_name = "KernelForge-MultiAgent"
+version = "0.1.0"
+
+[hardware]
+default_gpu = "RTX5070"
+supported_gpus = ["RTX5070", "B200", "H100", "A100", "RTX4090"]
+default_arch = "sm_120"
+
+[workflow]
+default_mode = 2
+max_rounds = 10
+phase1_timeout_seconds = 18000
+phase2_timeout_seconds = 3600
+phase3_timeout_seconds = 7200
+
+[phase1]
+max_iterations = 10
+subset_ratio = 0.1
+time_budget_seconds = 14400
+min_speedup = 2.0
+strategies_limit = 3
+
+[phase2]
+max_iterations = 15
+full_workload = true
+time_budget_seconds = 28800
+exploration_paths = 3
+variance_runs = 20
+max_variance = 0.05
+
+[phase3]
+full_benchmark = true
+sanitizer_checks = ["memcheck", "racecheck", "synccheck"]
+regression_test = true
+archive = true
+min_pass_rate = 1.0
+
+[benchmark]
+default_benchmark = "cuda-standalone"
+dataset_path = ""
+warmup_runs = 3
+measurement_runs = 10
+use_median = true
+generated_dir = "scripts/workflow/benchmarks/generated"
+
+[agents.master]
+enabled = true
+llm_model = "claude-opus-4-8"
+
+[agents.optimizer]
+enabled = true
+llm_model = "claude-opus-4-8"
+max_candidates = 5
+
+[agents.analyzer]
+enabled = true
+llm_model = "claude-opus-4-8"
+profiling_metrics = [
+    "dram__throughput",
+    "sm__utilization",
+    "gpu__compute_memory_throughput",
+    "sm__warps_active",
+]
+
+[agents.profiler]
+enabled = true
+ncu_enabled = true
+ncu_metrics = "full"
+
+[agents.reviewer]
+enabled = true
+llm_model = "claude-opus-4-8"
+quality_threshold = 8.0
+
+[agents.coordinator]
+enabled = true
+parallel_execution = false
+
+[skills]
+skills_dir = "skills"
+enabled_skills = [
+    "KernelWiki",
+    "ncu-report-skill",
+    "optimization-knowledge",
+    "strategy-library",
+    "benchmark",
+    "three-stage-workflow",
+]
+
+[optimization]
+available_strategies = [
+    "matmul_tiling",
+    "reduction_warp_primitives",
+    "vectorized_memory",
+    "kernel_fusion",
+    "tensor_core",
+    "bank_conflict_free",
+    "occupancy_tuning",
+    "cooperative_groups",
+    "persistent_threads",
+]
+
+[memory]
+reference_dir = "scripts/workflow/trajectory/reference"
+archive_variants = true
+archive_failed = true
+keep_transcripts = true
+ledger_path = "scripts/workflow/trajectory/harness-ledger.md"
+
+[safety]
+detect_silent_skip = true
+banned_libraries = ["flashinfer", "deepgemm", "cublas", "cudnn"]
+allowed_libraries = ["cutlass", "cute", "triton", "torch"]
+min_code_quality = 7.0
+max_register_pressure = 255
+
+[logging]
+log_level = "INFO"
+log_file = "scripts/workflow/logs/kfma.log"
+enable_rich_output = true
+
+[performance_targets.gemm]
+phase1_min = 2.0
+phase2_min = 5.0
+phase3_target = 10.0
+
+[performance_targets.reduce]
+phase1_min = 3.0
+phase2_min = 6.0
+phase3_target = 10.0
+
+[performance_targets.element_wise]
+phase1_min = 1.5
+phase2_min = 3.0
+phase3_target = 5.0
+
+[performance_targets.attention]
+phase1_min = 3.0
+phase2_min = 8.0
+phase3_target = 15.0

@@ -1,0 +1,33 @@
+[project]
+name = "kernelforge-multiagent"
+version = "0.1.0"
+description = "Multi-agent CUDA kernel optimization workflow with consolidated kernel sources."
+readme = "README.md"
+requires-python = ">=3.10,<3.14"
+dependencies = [
+    "anthropic>=0.18.0",
+    "colorama>=0.4.6",
+    "numpy>=1.24.0",
+    "openai>=1.0.0",
+    "pandas>=2.0.0",
+    "pyyaml>=6.0",
+    "rich>=13.0.0",
+    "seaborn>=0.12.0",
+    "toml>=0.10.2",
+    "torch>=2.0.0",
+    "tqdm>=4.65.0",
+    "triton>=2.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black>=23.0.0",
+    "flake8>=6.0.0",
+    "mypy>=1.4.0",
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+]
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]

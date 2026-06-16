@@ -1,0 +1,84 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+venv/
+env/
+.venv/
+ENV/
+
+# IDE and OS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs and generated run state
+build/
+logs/
+*.log
+trajectory/
+kfma-run-*/
+../kfma-run-*/
+benchmarks/generated/
+benchmark_results/
+outputs/
+runs/
+rounds/
+workspaces/*
+!workspaces/README.md
+profile/
+ncu_reports/
+layernorm_optimization/
+scripts/workflow/build/
+scripts/workflow/logs/
+scripts/workflow/trajectory/
+scripts/workflow/kfma-run-*/
+scripts/workflow/benchmarks/generated/
+scripts/workflow/benchmark_results/
+scripts/workflow/profile/
+scripts/workflow/ncu_reports/
+scripts/workflow/layernorm_optimization/
+
+# CUDA and profiler artifacts
+*.o
+*.so
+*.a
+*.out
+*.exe
+*.ptx
+*.cubin
+*.ncu-rep
+*.nsys-rep
+*_ncu_report*
+*_feedback_iter*.json
+*_opt_report_iter*.json
+*_multi_iteration_report.json
+*_agent_prompt_iter*.txt
+
+# Large local data
+data/
+flashinfer-trace/
+*.bin
+*.dat
+*.pt
+*.pth
+*.ckpt
+
+# Notebook and archives
+.ipynb_checkpoints/
+*.ipynb
+*.tar.gz
+*.zip
+
+# Secrets
+.env
+.env.local
