@@ -3,11 +3,10 @@
 
 # 说明：
 # - 优先从 reference/<family>/baseline.json 读取锚点、数据集、definition、上一轮结论
-# - 所有新轮次必须从官方 baseline 源码派生；工作区会自动展开官方 baseline source
+# - family 必须属于当前主线六类算子，且所有新轮次都必须从官方 baseline 源码派生
 # - 自动为本轮生成 round_config.json / BRIEF.md / draft.md
 # - 自动生成 NCU / KernelWiki 证据模板，未补齐前不得进入最终决策
 # - RTX 5070 / sm_120 的 NCU 证据只能使用 /usr/local/NVIDIA-Nsight-Compute-2025.2/ncu
-# - 对 rmsnorm 额外生成 src/gen_solution.py，方便把当前 kernel.cu 写回 flashinfer-trace
 # - 不执行 benchmark / validate，只准备好本轮工作区
 
 set -euo pipefail
@@ -18,12 +17,19 @@ PYTHON_BIN="${PYTHON_BIN:-python}"
 
 if [ $# -lt 2 ]; then
     echo "Usage: $0 <family> <round_number>"
-    echo "Example: $0 rmsnorm 0"
+    echo "Example: $0 dsa_sparse_attention 0"
     exit 1
 fi
 
 FAMILY="$1"
 ROUND="$2"
+
+CANONICAL_FAMILY="$("$PYTHON_BIN" "$PROJECT_ROOT/scripts/operator_policy.py" canonical "$FAMILY" 2>/dev/null || true)"
+if [ -z "$CANONICAL_FAMILY" ]; then
+    echo "Error: unsupported family: $FAMILY"
+    exit 1
+fi
+FAMILY="$CANONICAL_FAMILY"
 
 REFERENCE_DIR="$PROJECT_ROOT/reference/$FAMILY"
 ROUND_DIR="$PROJECT_ROOT/rounds/round-$ROUND/$FAMILY"
@@ -41,8 +47,16 @@ echo "=========================================="
 echo "Round $ROUND: $FAMILY"
 echo "=========================================="
 
-# 读取参考状态；rmsnorm 提供保守默认值，便于把现有样板闭环跑通
-eval "$("$PYTHON_BIN" - "$FAMILY" "$ROUND" "$BASELINE_FILE" "$REFERENCE_DIR" "$ROUND_DIR" <<'PY'
+# baseline.json 必须先满足主线 family policy
+if ! "$PYTHON_BIN" "$PROJECT_ROOT/scripts/operator_policy.py" validate "$FAMILY" "$BASELINE_FILE" >/dev/null 2>&1; then
+    echo "Error: $BASELINE_FILE does not satisfy the mainline operator policy."
+    echo "Please fill or fix baseline.json before starting this round."
+    "$PYTHON_BIN" "$PROJECT_ROOT/scripts/operator_policy.py" validate "$FAMILY" "$BASELINE_FILE" || true
+    exit 1
+fi
+
+# 读取参考状态并合并 family policy 默认值
+eval "$("$PYTHON_BIN" - "$FAMILY" "$ROUND" "$BASELINE_FILE" "$REFERENCE_DIR" "$ROUND_DIR" "$PROJECT_ROOT" <<'PY'
 import json
 import os
 import shlex
@@ -54,55 +68,39 @@ round_id = int(sys.argv[2])
 baseline_file = Path(sys.argv[3])
 reference_dir = Path(sys.argv[4])
 round_dir = Path(sys.argv[5])
+project_root = Path(sys.argv[6])
 
-defaults = {
-    "dataset_path": "",
-    "definition": "",
-    "baseline_solution": "",
+sys.path.insert(0, str(project_root / "scripts"))
+from operator_policy import build_baseline_template  # type: ignore
+
+defaults = build_baseline_template(family)
+defaults.update(
+    {
     "anchor": "",
     "anchor_kernel": "",
     "anchor_solution": "",
-    "accept_threshold": 1.05,
     "latest_sol_base": "",
     "latest_decision": "",
     "latest_reason": "",
     "next_direction": "",
     "next_technique": "",
     "ncu_summary": "",
-    "solution_prefix": "",
     "author": "",
-    "op_type": family,
     "entry_symbol": "",
     "binding": "tvm-ffi",
-    "derive_from_official_baseline": True,
+    "baseline_dataset_group": defaults["baseline_dataset_group"],
     "official_baseline_source_json": "",
     "official_baseline_source_dir": "",
-}
-
-if family == "rmsnorm":
-    defaults.update(
-        {
-            "dataset_path": "/mnt/d/Agent/flashinfer-trace",
-            "definition": "rmsnorm_h4096",
-            "baseline_solution": "flashinfer_wrapper_2e27cd",
-            "anchor": "official-baseline-v0",
-            "anchor_kernel": str(reference_dir / "variants" / "official-baseline-v0" / "kernel.cu"),
-            "anchor_solution": "flashinfer_wrapper_2e27cd",
-            "accept_threshold": 1.05,
-            "latest_sol_base": "",
-            "latest_decision": "RESTART",
-            "latest_reason": "从官方 baseline 源码重新启动新的优化轮次",
-            "next_direction": "先基于官方 baseline 源码建立新的 CUDA 派生起点，再做真实 NCU 驱动优化",
-            "next_technique": "保持官方 baseline 语义一致，逐步做 CUDA 化与真实 profile 校验",
-            "ncu_summary": "新的轮次从官方 baseline 源码重新启动；历史旧轮次仅作为 legacy 证据，不再作为派生起点。",
-            "solution_prefix": "kernelforge_rmsnorm_h4096_cuda_v",
-            "author": "kernelforge",
-            "op_type": "rmsnorm",
-            "entry_symbol": "rmsnorm_h4096",
-            "binding": "tvm-ffi",
-            "derive_from_official_baseline": True,
-        }
-    )
+    "comparison_denominator": defaults["comparison_denominator"],
+    "baseline_source_kind": defaults["baseline_source_kind"],
+    "allowed_definition_prefixes": defaults["allowed_definition_prefixes"],
+    "allowed_op_types": defaults["allowed_op_types"],
+    "family_tier": defaults["family_tier"],
+    "supported_targets": defaults["supported_targets"],
+    "required_ncu_binary": defaults["required_ncu_binary"],
+    "required_ncu_version": defaults["required_ncu_version"],
+    }
+)
 
 data = {}
 if baseline_file.exists():
@@ -134,11 +132,20 @@ ncu_summary = pick(data.get("latest_ncu_summary"), latest.get("ncu_summary"), de
 solution_prefix = pick(data.get("solution_prefix"), defaults["solution_prefix"])
 author = pick(data.get("author"), defaults["author"])
 op_type = pick(data.get("op_type"), defaults["op_type"])
+baseline_dataset_group = pick(data.get("baseline_dataset_group"), defaults["baseline_dataset_group"])
 entry_symbol = pick(data.get("entry_symbol"), defaults["entry_symbol"])
 binding = pick(data.get("binding"), defaults["binding"])
+comparison_denominator = pick(data.get("comparison_denominator"), defaults["comparison_denominator"])
+baseline_source_kind = pick(data.get("baseline_source_kind"), defaults["baseline_source_kind"])
+required_ncu_binary = pick(data.get("required_ncu_binary"), defaults["required_ncu_binary"])
+required_ncu_version = pick(data.get("required_ncu_version"), defaults["required_ncu_version"])
 derive_from_official_baseline = bool(
     pick(data.get("derive_from_official_baseline"), defaults["derive_from_official_baseline"])
 )
+allowed_definition_prefixes = data.get("allowed_definition_prefixes") or defaults["allowed_definition_prefixes"]
+allowed_op_types = data.get("allowed_op_types") or defaults["allowed_op_types"]
+family_tier = pick(data.get("family_tier"), defaults["family_tier"])
+supported_targets = data.get("supported_targets") or defaults["supported_targets"]
 
 official_baseline_source_json = ""
 if dataset_path and definition and baseline_solution:
@@ -147,7 +154,7 @@ if dataset_path and definition and baseline_solution:
             Path(dataset_path)
             / "solutions"
             / "baseline"
-            / op_type
+            / baseline_dataset_group
             / definition
             / f"{baseline_solution}.json"
         ).resolve()
@@ -182,8 +189,17 @@ fields = {
     "SOLUTION_PREFIX": str(solution_prefix),
     "AUTHOR": str(author),
     "OP_TYPE": str(op_type),
+    "BASELINE_DATASET_GROUP": str(baseline_dataset_group),
     "ENTRY_SYMBOL": str(entry_symbol),
     "BINDING": str(binding),
+    "COMPARISON_DENOMINATOR": str(comparison_denominator),
+    "BASELINE_SOURCE_KIND": str(baseline_source_kind),
+    "ALLOWED_DEFINITION_PREFIXES_JSON": json.dumps(allowed_definition_prefixes, ensure_ascii=False),
+    "ALLOWED_OP_TYPES_JSON": json.dumps(allowed_op_types, ensure_ascii=False),
+    "FAMILY_TIER": str(family_tier),
+    "SUPPORTED_TARGETS_JSON": json.dumps(supported_targets, ensure_ascii=False),
+    "REQUIRED_NCU_BINARY": str(required_ncu_binary),
+    "REQUIRED_NCU_VERSION": str(required_ncu_version),
     "DERIVE_FROM_OFFICIAL_BASELINE": "1" if derive_from_official_baseline else "0",
     "OFFICIAL_BASELINE_SOURCE_JSON": str(official_baseline_source_json),
     "OFFICIAL_BASELINE_SOURCE_DIR": str(official_baseline_source_dir),
@@ -258,9 +274,17 @@ cat > "$ROUND_CONFIG" <<EOF
   "accept_threshold": $ACCEPT_THRESHOLD,
   "author": "$AUTHOR",
   "op_type": "$OP_TYPE",
+  "baseline_dataset_group": "$BASELINE_DATASET_GROUP",
   "entry_symbol": "$ENTRY_SYMBOL",
-  "binding": "$BINDING"
-  ,
+  "binding": "$BINDING",
+  "comparison_denominator": "$COMPARISON_DENOMINATOR",
+  "baseline_source_kind": "$BASELINE_SOURCE_KIND",
+  "allowed_definition_prefixes": $ALLOWED_DEFINITION_PREFIXES_JSON,
+  "allowed_op_types": $ALLOWED_OP_TYPES_JSON,
+  "family_tier": "$FAMILY_TIER",
+  "supported_targets": $SUPPORTED_TARGETS_JSON,
+  "required_ncu_binary": "$REQUIRED_NCU_BINARY",
+  "required_ncu_version": "$REQUIRED_NCU_VERSION",
   "derive_from_official_baseline": $([ "$DERIVE_FROM_OFFICIAL_BASELINE" = "1" ] && echo "true" || echo "false"),
   "official_baseline_source_json": "$OFFICIAL_BASELINE_SOURCE_JSON",
   "official_baseline_source_dir": "$OFFICIAL_BASELINE_SOURCE_DIR"
@@ -322,11 +346,13 @@ $GOAL_BLOCK
 - **规则 3**: NCU 只能使用 \`/usr/local/NVIDIA-Nsight-Compute-2025.2/ncu\`；禁止使用 \`/usr/local/cuda/bin/ncu\`
 - **规则 4**: 没有补齐这两个文件时，\`./scripts/evaluate-round.sh\` 会直接失败，不允许进入决策
 - **规则 5**: 新轮次禁止从旧的自研 rejected 候选直接派生，必须先阅读并基于官方 baseline 源码展开改动
+- **规则 6**: 本轮 family policy 固定为 \`$COMPARISON_DENOMINATOR\`，不得把 parent/历史 anchor 当最终分母
 
 ## 约束
 - 必须使用真实 FlashInfer-Bench 数据集：\`$DATASET_PATH\`
 - definition 固定为：\`$DEFINITION\`
 - 官方 baseline 固定为：\`$BASELINE_SOLUTION\`
+- 最终成绩分母固定为：\`$COMPARISON_DENOMINATOR\`
 - 正确性不过即 REJECT
 - 成绩只认 \`sol/base\`
 - RTX 5070 / sm_120 属于 Blackwell，必须参考 \`skills/KernelWiki\`
@@ -456,13 +482,12 @@ if [ -f "$PROJECT_ROOT/docs/draft_template.md" ]; then
     echo "  ✓ Draft template copied"
 fi
 
-# 为 rmsnorm 生成 solution 写回脚本
-if [ "$FAMILY" = "rmsnorm" ] && [ -n "$DATASET_PATH" ] && [ -n "$DEFINITION" ] && [ -n "$CANDIDATE_SOLUTION" ]; then
+if [ -n "$DATASET_PATH" ] && [ -n "$DEFINITION" ] && [ -n "$CANDIDATE_SOLUTION" ] && [ -n "$OP_TYPE" ]; then
     cat > "$ROUND_DIR/src/gen_solution.py" <<EOF
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-将本轮 RMSNorm 候选 kernel.cu 写入 flashinfer-trace solution.json。
+将本轮候选 kernel.cu 写入 flashinfer-trace solution.json。
 """
 
 import json
@@ -476,27 +501,31 @@ DEFINITION = "$DEFINITION"
 SOLUTION_NAME = "$CANDIDATE_SOLUTION"
 ENTRY_SYMBOL = "$ENTRY_SYMBOL"
 BINDING = "$BINDING"
+FAMILY = "$FAMILY"
 
 
 def main() -> None:
+    if not ENTRY_SYMBOL:
+        raise SystemExit("ENTRY_SYMBOL 不能为空，请先在 reference/<family>/baseline.json 中补齐后再生成 solution。")
+
     cuda_source = KERNEL_SRC.read_text(encoding="utf-8")
     solution = {
         "name": SOLUTION_NAME,
         "definition": DEFINITION,
-        "author": AUTHOR,
-        "description": "KernelForge-MultiAgent 自动生成的 RMSNorm 候选实现。",
+        "author": AUTHOR or "kernelforge",
+        "description": f"KernelForge-MultiAgent 自动生成的 {FAMILY} 候选实现。",
         "spec": {
             "language": "cuda",
-            "target_hardware": ["NVIDIA_B200", "cuda"],
+            "target_hardware": ["NVIDIA_Blackwell", "cuda"],
             "entry_point": f"kernel.cu::{ENTRY_SYMBOL}",
             "binding": BINDING,
             "destination_passing_style": True,
-            "dependencies": [],
+            "dependencies": []
         },
-        "sources": [{"path": "kernel.cu", "content": cuda_source}],
+        "sources": [{"path": "kernel.cu", "content": cuda_source}]
     }
 
-    out_dir = DATASET_ROOT / "solutions" / AUTHOR / OP_TYPE / DEFINITION
+    out_dir = DATASET_ROOT / "solutions" / (AUTHOR or "kernelforge") / OP_TYPE / DEFINITION
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{SOLUTION_NAME}.json"
     out_path.write_text(json.dumps(solution, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -507,7 +536,7 @@ if __name__ == "__main__":
     main()
 EOF
     chmod +x "$ROUND_DIR/src/gen_solution.py"
-    echo "  ✓ RMSNorm solution generator created"
+    echo "  ✓ Generic solution generator created"
 fi
 
 # 初始化跟踪文件

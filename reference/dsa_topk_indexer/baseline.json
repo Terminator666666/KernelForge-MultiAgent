@@ -1,0 +1,33 @@
+{
+  "family": "dsa_topk_indexer",
+  "family_tier": "primary",
+  "dataset_path": "/mnt/d/Agent/flashinfer-trace",
+  "definition": "dsa_topk_indexer_fp8_h64_d128_topk2048_ps64",
+  "baseline_solution": "flashinfer_deepgemm_wrapper_2ba145",
+  "baseline_source_kind": "official_baseline",
+  "comparison_denominator": "official_baseline",
+  "accept_threshold": 1.05,
+  "derive_from_official_baseline": true,
+  "op_type": "dsa_topk_indexer",
+  "baseline_dataset_group": "dsa",
+  "solution_prefix": "kernelforge_dsa_topk_indexer_cuda_v",
+  "required_ncu_binary": "/usr/local/NVIDIA-Nsight-Compute-2025.2/ncu",
+  "required_ncu_version": "2025.2",
+  "allowed_definition_prefixes": [
+    "dsa_topk_indexer_"
+  ],
+  "allowed_op_types": [
+    "dsa_topk_indexer"
+  ],
+  "supported_targets": [
+    {
+      "definition": "dsa_topk_indexer_fp8_h64_d128_topk2048_ps64",
+      "op_type": "dsa_topk_indexer",
+      "baseline_dataset_group": "dsa",
+      "baseline_solution": "flashinfer_deepgemm_wrapper_2ba145",
+      "compare_against": "official_baseline",
+      "baseline_source_kind": "official_baseline"
+    }
+  ],
+  "status": "pending_baseline_capture"
+}

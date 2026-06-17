@@ -23,6 +23,13 @@ fi
 FAMILY="$1"
 ROUND="$2"
 
+CANONICAL_FAMILY="$("$PYTHON_BIN" "$PROJECT_ROOT/scripts/operator_policy.py" canonical "$FAMILY" 2>/dev/null || true)"
+if [ -z "$CANONICAL_FAMILY" ]; then
+    echo "Error: unsupported family: $FAMILY"
+    exit 1
+fi
+FAMILY="$CANONICAL_FAMILY"
+
 REFERENCE_DIR="$PROJECT_ROOT/reference/$FAMILY"
 ROUND_DIR="$PROJECT_ROOT/rounds/round-$ROUND/$FAMILY"
 BASELINE_FILE="$REFERENCE_DIR/baseline.json"
@@ -75,6 +82,9 @@ fields = {
     "NCU_EVIDENCE_FILE": pick(round_cfg.get("ncu_evidence_file")),
     "KERNELWIKI_EVIDENCE_FILE": pick(round_cfg.get("kernelwiki_evidence_file")),
     "ACCEPT_THRESHOLD": str(pick(round_cfg.get("accept_threshold"), baseline.get("accept_threshold"), 1.05)),
+    "DERIVE_FROM_OFFICIAL_BASELINE": "1" if bool(pick(round_cfg.get("derive_from_official_baseline"), baseline.get("derive_from_official_baseline"), True)) else "0",
+    "COMPARISON_DENOMINATOR": pick(round_cfg.get("comparison_denominator"), baseline.get("comparison_denominator")),
+    "BASELINE_SOURCE_KIND": pick(round_cfg.get("baseline_source_kind"), baseline.get("baseline_source_kind")),
 }
 
 for key, value in fields.items():
@@ -90,7 +100,7 @@ for required_name in DATASET_PATH DEFINITION BASELINE_SOLUTION CANDIDATE_SOLUTIO
 done
 
 echo "Step 0/10: validating NCU + KernelWiki evidence"
-eval "$("$PYTHON_BIN" - "$PROJECT_ROOT" "$ROUND_DIR" "$ROUND_CONFIG" <<'PY'
+eval "$("$PYTHON_BIN" - "$PROJECT_ROOT" "$ROUND_DIR" "$ROUND_CONFIG" "$FAMILY" <<'PY'
 import json
 import shlex
 import sys
@@ -99,6 +109,10 @@ from pathlib import Path
 project_root = Path(sys.argv[1])
 round_dir = Path(sys.argv[2])
 round_cfg = json.loads(Path(sys.argv[3]).read_text(encoding="utf-8"))
+family = sys.argv[4]
+
+sys.path.insert(0, str(project_root / "scripts"))
+from operator_policy import validate_baseline_config  # type: ignore
 
 def fail(message: str) -> None:
     print(message, file=sys.stderr)
@@ -126,6 +140,11 @@ if not kernelwiki_file.exists():
 
 ncu = json.loads(ncu_file.read_text(encoding='utf-8'))
 kernelwiki = json.loads(kernelwiki_file.read_text(encoding='utf-8'))
+
+policy_errors = validate_baseline_config(family, round_cfg)
+if policy_errors:
+    for item in policy_errors:
+        fail(f"Error: round_config.json policy 校验失败: {item}")
 
 if round_cfg.get("derive_from_official_baseline") is True:
     baseline_src_json_raw = str(round_cfg.get("official_baseline_source_json", "")).strip()
@@ -189,6 +208,13 @@ if not decision_driver:
 if not why_this_round:
     fail("Error: NCU evidence comparison_summary.why_this_round 不能为空")
 
+comparison_denominator = str(round_cfg.get("comparison_denominator", "")).strip()
+baseline_source_kind = str(round_cfg.get("baseline_source_kind", "")).strip()
+if comparison_denominator not in {"official_baseline", "expert_baseline"}:
+    fail("Error: comparison_denominator 只能是 official_baseline 或 expert_baseline")
+if baseline_source_kind not in {"official_baseline", "expert_baseline"}:
+    fail("Error: baseline_source_kind 只能是 official_baseline 或 expert_baseline")
+
 pages = kernelwiki.get("pages") or []
 if not pages:
     fail("Error: KernelWiki evidence.pages 不能为空")
@@ -228,6 +254,8 @@ fields = {
     "NCU_REQUIRED_BINARY": required_ncu_binary,
     "KERNELWIKI_PAGE_COUNT": str(len(pages)),
     "KERNELWIKI_PRIMARY_PAGE": primary_page,
+    "COMPARISON_DENOMINATOR": comparison_denominator,
+    "BASELINE_SOURCE_KIND": baseline_source_kind,
 }
 
 for key, value in fields.items():
@@ -240,6 +268,7 @@ echo "  ✓ KernelWiki refs : $KERNELWIKI_EVIDENCE_FILE"
 if [ "${DERIVE_FROM_OFFICIAL_BASELINE:-}" = "1" ]; then
   echo "  ✓ Baseline derive  : official baseline source extracted"
 fi
+echo "  ✓ Score denominator: $COMPARISON_DENOMINATOR"
 echo "  ✓ NCU bottleneck  : $NCU_BOTTLENECK"
 echo "  ✓ Decision driver : $NCU_DECISION_DRIVER"
 echo ""
@@ -334,6 +363,8 @@ cat > "$ROUND_DIR/decision.json" <<EOF
   "definition": "$DEFINITION",
   "dataset_path": "$DATASET_PATH",
   "baseline_solution": "$BASELINE_SOLUTION",
+  "comparison_denominator": "$COMPARISON_DENOMINATOR",
+  "baseline_source_kind": "$BASELINE_SOURCE_KIND",
   "passed_workloads": ${PASSED_WORKLOADS:-0},
   "total_workloads": ${TOTAL_WORKLOADS:-0},
   "avg_sol_vs_ref": ${SOL_VS_REF:-null},
@@ -380,9 +411,13 @@ baseline.setdefault("baseline_solution", round_cfg.get("baseline_solution"))
 baseline.setdefault("accept_threshold", round_cfg.get("accept_threshold", 1.05))
 baseline.setdefault("author", round_cfg.get("author", ""))
 baseline.setdefault("op_type", round_cfg.get("op_type", round_cfg.get("family")))
+baseline.setdefault("baseline_dataset_group", round_cfg.get("baseline_dataset_group", ""))
 baseline.setdefault("entry_symbol", round_cfg.get("entry_symbol", ""))
 baseline.setdefault("binding", round_cfg.get("binding", "tvm-ffi"))
 baseline.setdefault("solution_prefix", "")
+baseline.setdefault("comparison_denominator", round_cfg.get("comparison_denominator", ""))
+baseline.setdefault("baseline_source_kind", round_cfg.get("baseline_source_kind", ""))
+baseline.setdefault("family_tier", round_cfg.get("family_tier", "primary"))
 
 baseline["latest_result"] = {
     "round": decision["round"],
@@ -423,7 +458,7 @@ entry = {
     "sol_vs_ref": decision["avg_sol_vs_ref"],
     "sol_vs_base": decision["avg_sol_vs_base"],
     "decision": decision["decision"],
-    "description": f"{decision['reason']} | NCU: {decision.get('ncu_decision_driver', '')} | KernelWiki: {decision.get('kernelwiki_primary_page', '')}",
+    "description": f"{decision['reason']} | denominator: {decision.get('comparison_denominator', '')} | NCU: {decision.get('ncu_decision_driver', '')} | KernelWiki: {decision.get('kernelwiki_primary_page', '')}",
     "timestamp": decision["timestamp"],
 }
 

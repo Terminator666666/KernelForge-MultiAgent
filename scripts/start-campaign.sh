@@ -5,24 +5,39 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+PYTHON_BIN="${PYTHON_BIN:-python}"
 
 # Usage
 if [ $# -lt 2 ]; then
     echo "Usage: $0 <family> <max_rounds> [target_speedup]"
     echo ""
     echo "Arguments:"
-    echo "  family         - Operator family (e.g., rmsnorm, gemm, gqa_paged)"
+    echo "  family         - 主线算子 family（dsa_sparse_attention, gdn_prefill, gdn_decode, dsa_topk_indexer, paged_attention, moe_fp8）"
     echo "  max_rounds     - Maximum number of optimization rounds (e.g., 10)"
     echo "  target_speedup - Optional target speedup (e.g., 2.0 for 2x)"
     echo ""
     echo "Example:"
-    echo "  $0 rmsnorm 10 2.0"
+    echo "  $0 dsa_sparse_attention 10 2.0"
     exit 1
 fi
 
 FAMILY="$1"
 MAX_ROUNDS="$2"
 TARGET_SPEEDUP="${3:-}"
+
+CANONICAL_FAMILY="$("$PYTHON_BIN" "$PROJECT_ROOT/scripts/operator_policy.py" canonical "$FAMILY" 2>/dev/null || true)"
+if [ -z "$CANONICAL_FAMILY" ]; then
+    echo "Error: unsupported family: $FAMILY"
+    echo "Only the six mainline families are allowed:"
+    echo "  dsa_sparse_attention"
+    echo "  gdn_prefill"
+    echo "  gdn_decode"
+    echo "  dsa_topk_indexer"
+    echo "  paged_attention"
+    echo "  moe_fp8"
+    exit 1
+fi
+FAMILY="$CANONICAL_FAMILY"
 
 echo "=========================================="
 echo "KernelForge-MultiAgent Campaign"
@@ -97,8 +112,8 @@ README_EOF
 TRAPS_EOF
     sed -i "s/{{FAMILY}}/$FAMILY/g" "$REFERENCE_DIR/TRAPS.md"
     
-    # Create baseline.json placeholder
-    echo '{"latency_ms": null, "status": "pending"}' > "$REFERENCE_DIR/baseline.json"
+    # Create baseline.json placeholder from the mainline family policy
+    "$PYTHON_BIN" "$PROJECT_ROOT/scripts/operator_policy.py" template "$FAMILY" > "$REFERENCE_DIR/baseline.json"
     
     # Create solutions.jsonl
     touch "$REFERENCE_DIR/solutions.jsonl"

@@ -1,0 +1,33 @@
+{
+  "family": "gdn_prefill",
+  "family_tier": "primary",
+  "dataset_path": "/mnt/d/Agent/flashinfer-trace",
+  "definition": "gdn_prefill_qk4_v8_d128_k_last",
+  "baseline_solution": "flashinfer_wrapper_123ca6",
+  "baseline_source_kind": "official_baseline",
+  "comparison_denominator": "official_baseline",
+  "accept_threshold": 1.05,
+  "derive_from_official_baseline": true,
+  "op_type": "gdn_prefill",
+  "baseline_dataset_group": "gdn",
+  "solution_prefix": "kernelforge_gdn_prefill_cuda_v",
+  "required_ncu_binary": "/usr/local/NVIDIA-Nsight-Compute-2025.2/ncu",
+  "required_ncu_version": "2025.2",
+  "allowed_definition_prefixes": [
+    "gdn_prefill_"
+  ],
+  "allowed_op_types": [
+    "gdn_prefill"
+  ],
+  "supported_targets": [
+    {
+      "definition": "gdn_prefill_qk4_v8_d128_k_last",
+      "op_type": "gdn_prefill",
+      "baseline_dataset_group": "gdn",
+      "baseline_solution": "flashinfer_wrapper_123ca6",
+      "compare_against": "official_baseline",
+      "baseline_source_kind": "official_baseline"
+    }
+  ],
+  "status": "pending_baseline_capture"
+}

@@ -1,0 +1,1 @@
+{"id":"official-baseline-v0","parent":null,"solution_name":"flashinfer_deepgemm_wrapper_2ba145","definition":"dsa_topk_indexer_fp8_h64_d128_topk2048_ps64","decision":"BASELINE","description":"官方 baseline 方案占位锚点；来源于 flashinfer-trace baseline 数据集。"}

@@ -20,20 +20,19 @@ from typing import Any, Dict, Optional
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW_ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
+
+from operator_policy import canonicalize_family, list_primary_families  # type: ignore
 
 
 OPERATOR_SOURCES = {
-    # 仓库内保留的算子源码入口；当前主线优化范围见 README / CLAUDE 规则
-    "gemm": REPO_ROOT / "kernels" / "operators" / "gemm" / "gemm_final.cu",
-    "gqa_paged": REPO_ROOT / "kernels" / "operators" / "gqa_paged" / "gqa_paged_final.cu",
-    "gqa_ragged": REPO_ROOT / "kernels" / "operators" / "gqa_ragged" / "gqa_ragged_final.cu",
-    "mla_paged": REPO_ROOT / "kernels" / "operators" / "mla_paged" / "mla_paged_final.cu",
-    "dsa_paged": REPO_ROOT / "kernels" / "operators" / "dsa_paged" / "dsa_paged_final.cu",
-    "moe": REPO_ROOT / "kernels" / "operators" / "moe" / "moe_final.cu",
-    "rmsnorm": REPO_ROOT / "kernels" / "operators" / "rmsnorm" / "rmsnorm_final.cu",
-    "rope": REPO_ROOT / "kernels" / "operators" / "rope" / "rope_final.cu",
-    "sampling": REPO_ROOT / "kernels" / "operators" / "sampling" / "sampling_final.cu",
-    "gdn": REPO_ROOT / "kernels" / "operators" / "gdn" / "gdn_final.cu",
+    # 当前主线只允许六类 family；底层先复用仓库现有实现目录
+    "dsa_sparse_attention": REPO_ROOT / "kernels" / "operators" / "dsa_paged" / "dsa_paged_final.cu",
+    "gdn_prefill": REPO_ROOT / "kernels" / "operators" / "gdn" / "gdn_final.cu",
+    "gdn_decode": REPO_ROOT / "kernels" / "operators" / "gdn" / "gdn_final.cu",
+    "dsa_topk_indexer": REPO_ROOT / "kernels" / "operators" / "dsa_paged" / "dsa_paged_final.cu",
+    "paged_attention": REPO_ROOT / "kernels" / "operators" / "gqa_paged" / "gqa_paged_final.cu",
+    "moe_fp8": REPO_ROOT / "kernels" / "operators" / "moe" / "moe_final.cu",
 }
 
 
@@ -126,7 +125,7 @@ class OptimizationCycle:
 
     def _run_ncu(self) -> Optional[subprocess.CompletedProcess[str]]:
         command = [
-            "ncu",
+            "/usr/local/NVIDIA-Nsight-Compute-2025.2/ncu",
             "--set",
             "full",
             "--target-processes",
@@ -144,54 +143,39 @@ class OptimizationCycle:
         self.feedback_file.write_text(json.dumps(feedback, indent=2), encoding="utf-8")
 
     def _generate_test_harness(self) -> str:
-        # FlashInfer-Bench 对齐的算子类型
-        if self.operator == "gemm":
-            return self._generate_gemm_test()
-        if self.operator == "gqa_paged":
+        if self.operator == "paged_attention":
             return self._generate_gqa_paged_test()
-        if self.operator == "gqa_ragged":
-            return self._generate_gqa_ragged_test()
-        if self.operator == "mla_paged":
-            return self._generate_mla_paged_test()
-        if self.operator == "dsa_paged":
+        if self.operator in {"dsa_sparse_attention", "dsa_topk_indexer"}:
             return self._generate_dsa_paged_test()
-        if self.operator == "moe":
+        if self.operator == "moe_fp8":
             return self._generate_moe_test()
-        if self.operator == "rmsnorm":
-            return self._generate_rmsnorm_test()
-        if self.operator == "rope":
-            return self._generate_rope_test()
-        if self.operator == "sampling":
-            return self._generate_sampling_test()
-        if self.operator == "gdn":
+        if self.operator in {"gdn_prefill", "gdn_decode"}:
             return self._generate_gdn_test()
         raise ValueError(f"Unsupported operator: {self.operator}")
 
     @staticmethod
     def _operator_from_name(kernel_name: str) -> str:
         lowered = kernel_name.lower().replace("-", "_")
-        # FlashInfer-Bench 对齐的算子类型
-        if "gemm" in lowered:
-            return "gemm"
-        if "gqa_paged" in lowered or "gqa-paged" in lowered:
-            return "gqa_paged"
-        if "gqa_ragged" in lowered or "gqa-ragged" in lowered:
-            return "gqa_ragged"
-        if "mla_paged" in lowered or "mla-paged" in lowered:
-            return "mla_paged"
-        if "dsa_paged" in lowered or "dsa-paged" in lowered:
-            return "dsa_paged"
-        if "moe" in lowered:
-            return "moe"
-        if "rmsnorm" in lowered or "rms_norm" in lowered:
-            return "rmsnorm"
-        if "rope" in lowered:
-            return "rope"
-        if "sampling" in lowered:
-            return "sampling"
-        if "gdn" in lowered:
-            return "gdn"
-        raise ValueError(f"Cannot infer operator from kernel name: {kernel_name}")
+        if "dsa_sparse_attention" in lowered:
+            return "dsa_sparse_attention"
+        if "dsa_topk_indexer" in lowered:
+            return "dsa_topk_indexer"
+        if "gdn_prefill" in lowered:
+            return "gdn_prefill"
+        if "gdn_decode" in lowered:
+            return "gdn_decode"
+        if any(token in lowered for token in ("paged_attention", "gqa_paged_decode", "mla_paged_decode", "mla_paged_prefill")):
+            return "paged_attention"
+        if "moe_fp8" in lowered or ("moe" in lowered and "fp8" in lowered):
+            return "moe_fp8"
+
+        canonical = canonicalize_family(lowered)
+        if canonical is not None:
+            return canonical
+        raise ValueError(
+            f"Cannot infer operator from kernel name: {kernel_name}. "
+            f"Allowed mainline families: {', '.join(list_primary_families())}"
+        )
 
     @staticmethod
     def _generate_gemm_test() -> str:
@@ -531,14 +515,15 @@ int main() {
 '''
 
     def _extra_compile_sources(self) -> list[Path]:
-        if self.operator == "rmsnorm":
-            return [REPO_ROOT / "kernels" / "operators" / "rmsnorm" / "rmsnorm_true_naive.cu"]
         return []
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run one CUDA optimization feedback cycle")
-    parser.add_argument("kernel_name", help="Kernel or operator name (e.g., gemm, gqa_paged, rmsnorm)")
+    parser.add_argument(
+        "kernel_name",
+        help="Kernel 或主线 family 名（dsa_sparse_attention, gdn_prefill, gdn_decode, dsa_topk_indexer, paged_attention, moe_fp8）",
+    )
     parser.add_argument("iteration", nargs="?", type=int, default=1)
     args = parser.parse_args()
 

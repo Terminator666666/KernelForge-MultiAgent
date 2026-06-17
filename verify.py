@@ -9,6 +9,7 @@ standalone CUDA smoke test in scripts/workflow/benchmarks/cuda/verify_all_kernel
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import subprocess
 import sys
@@ -23,6 +24,7 @@ REQUIRED_PATHS = [
     "README.md",
     "pyproject.toml",
     "requirements.txt",
+    "configs/operator_families.json",
     "docs/reproduction.md",
     "docs/PROJECT_AUDIT.md",
     "docs/SUPPORTED_OPERATORS.md",
@@ -43,6 +45,7 @@ REQUIRED_PATHS = [
     "kernels/operators/gdn/gdn_final.cu",
     "skills/KernelWiki/SKILL.md",
     "skills/ncu-report-skill/SKILL.md",
+    "scripts/operator_policy.py",
     "scripts/workflow/agents/sub_agents.py",
     "scripts/workflow/agents/dynamic_exploration.py",
     "scripts/workflow/closed_loop_optimizer.py",
@@ -94,6 +97,31 @@ def check_layout() -> bool:
                 print(f"ARTIFACT ... {len(matches) - 20} more matches for {pattern}")
 
     return ok
+
+
+def check_mainline_policy() -> bool:
+    policy_path = ROOT / "configs" / "operator_families.json"
+    try:
+        payload = json.loads(policy_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        print(f"POLICY ERROR {policy_path}: {exc}")
+        return False
+
+    families = payload.get("families", {})
+    expected = {
+        "dsa_sparse_attention",
+        "gdn_prefill",
+        "gdn_decode",
+        "dsa_topk_indexer",
+        "paged_attention",
+        "moe_fp8",
+    }
+    actual = {name for name, spec in families.items() if spec.get("tier") == "primary"}
+    if actual != expected:
+        print(f"POLICY ERROR mainline families mismatch: expected={sorted(expected)} actual={sorted(actual)}")
+        return False
+    print("OK   configs/operator_families.json mainline policy")
+    return True
 
 
 def require_tool(name: str) -> str:
@@ -152,7 +180,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     layout_ok = check_layout()
-    if not layout_ok:
+    policy_ok = check_mainline_policy()
+    if not layout_ok or not policy_ok:
         return 1
     if args.cuda:
         try:
