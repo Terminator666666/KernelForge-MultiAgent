@@ -1,1 +1,0 @@
-{"id":"official-baseline-v0","parent":null,"solution_name":"flashinfer_wrapper_a9588f","definition":"gqa_paged_decode_h32_kv8_d128_ps1","decision":"BASELINE","description":"默认官方/专家 baseline 占位锚点；当前指向 gqa_paged_decode_h32_kv8_d128_ps1。切换到 MLA 子目标时必须同步更新。"}

@@ -12,18 +12,21 @@ NCU 采集驱动：在单进程内构建「我的 kernel」与「官方 baseline
 
 用法（由 ncu 包裹调用）：
     ncu ... python ncu_driver.py --dataset <root> \
-        --definition rmsnorm_h4096 \
-        --solution kernelforge_rmsnorm_h4096_cuda_v1 \
-        --baseline flashinfer_wrapper_2e27cd \
-        --batch-size 16 \
+        --definition dsa_sparse_attention_h16_ckv512_kpe64_topk2048_ps64 \
+        --solution kernelforge_dsa_sparse_attention_cuda_v1 \
+        --baseline flashinfer_wrapper_5af199 \
+        --workload-uuid 7ddaefc67273438a813360560a7931ea \
         --which both|sol|base
 
 --which 控制本次只跑哪一个实现，便于分两次采集、各自命名报告。
+优先使用 --workload-uuid 绑定真实 trace workload；--batch-size 仅保留给
+旧的 batch_size 轴 definition 作为后备模式。
 """
 
 import argparse
 import os
 import sys
+from pathlib import Path
 
 import torch
 
@@ -40,7 +43,7 @@ if not hasattr(torch, "float4_e2m1fn_x2"):
     torch.float4_e2m1fn_x2 = torch.uint8  # type: ignore[attr-defined]
 
 from flashinfer_bench.bench.evaluators.utils import allocate_outputs  # noqa: E402
-from flashinfer_bench.bench.utils import gen_inputs  # noqa: E402
+from flashinfer_bench.bench.utils import gen_inputs, load_safetensors  # noqa: E402
 from flashinfer_bench.compile import BuilderRegistry  # noqa: E402
 from flashinfer_bench.data import TraceSet  # noqa: E402
 from flashinfer_bench.data.workload import RandomInput, Workload  # noqa: E402
@@ -52,7 +55,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--definition", required=True)
     p.add_argument("--solution", required=True)
     p.add_argument("--baseline", default=None)
-    p.add_argument("--batch-size", type=int, required=True)
+    p.add_argument("--batch-size", type=int, default=None)
+    p.add_argument(
+        "--workload-uuid",
+        default=None,
+        help="直接指定 dataset 里的 workload uuid，优先用于真实 trace NCU 采样",
+    )
     p.add_argument("--which", choices=["both", "sol", "base"], default="both")
     p.add_argument("--device", default="cuda:0")
     p.add_argument("--warmup", type=int, default=3,
@@ -63,21 +71,36 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     device = args.device
+    dataset_root = Path(args.dataset).resolve()
 
-    ts = TraceSet.from_path(args.dataset)
+    ts = TraceSet.from_path(str(dataset_root))
     definition = ts.definitions[args.definition]
 
-    # 构造一个指定 batch_size 的 workload（输入用随机，与官方一致）
-    input_specs = {name: RandomInput() for name in definition.inputs.keys()}
-    workload = Workload(
-        axes={"batch_size": args.batch_size},
-        inputs=input_specs,
-        uuid=f"ncu-bs{args.batch_size}",
-    )
+    workload = None
+    if args.workload_uuid:
+        for wt in ts.workloads.get(args.definition, []):
+            if wt.workload.uuid == args.workload_uuid:
+                workload = wt.workload
+                break
+        if workload is None:
+            raise SystemExit(
+                f"错误：definition '{args.definition}' 中找不到 workload uuid '{args.workload_uuid}'"
+            )
+    else:
+        if args.batch_size is None:
+            raise SystemExit("错误：必须提供 --workload-uuid 或 --batch-size 其中之一。")
+        # 后备模式：仅适用于 batch_size 为主轴的旧 definition
+        input_specs = {name: RandomInput() for name in definition.inputs.keys()}
+        workload = Workload(
+            axes={"batch_size": args.batch_size},
+            inputs=input_specs,
+            uuid=f"ncu-bs{args.batch_size}",
+        )
 
     reg = BuilderRegistry.get_instance()
 
-    inp = gen_inputs(definition, workload, device=device)
+    safe_tensors = load_safetensors(definition, workload, dataset_root)
+    inp = gen_inputs(definition, workload, device=device, safe_tensors=safe_tensors)
 
     sol_runnable = None
     base_runnable = None
@@ -87,14 +110,23 @@ def main() -> int:
         base_runnable = reg.build(definition, ts.get_solution(args.baseline))
 
     def run_sol():
-        out = allocate_outputs(definition, inp, device)
-        with torch.no_grad():
-            sol_runnable(*inp, *out)  # DPS
+        if sol_runnable.metadata.destination_passing_style:
+            out = allocate_outputs(definition, inp, device)
+            with torch.no_grad():
+                sol_runnable(*inp, *out)
+        else:
+            with torch.no_grad():
+                sol_runnable(*inp)
         torch.cuda.synchronize(device)
 
     def run_base():
-        with torch.no_grad():
-            base_runnable(*inp)  # value-returning
+        if base_runnable.metadata.destination_passing_style:
+            out = allocate_outputs(definition, inp, device)
+            with torch.no_grad():
+                base_runnable(*inp, *out)
+        else:
+            with torch.no_grad():
+                base_runnable(*inp)
         torch.cuda.synchronize(device)
 
     # 预热（ncu 端用 --launch-skip 跳过这些启动，只截取最后一次）
@@ -104,13 +136,19 @@ def main() -> int:
         if base_runnable is not None:
             run_base()
 
-    # 正式采集目标：每个实现各跑 1 次
+    # 正式采集目标：仅把被测执行段包进 profiler window，避免抓到前置随机数生成 kernel。
+    cudart = torch.cuda.cudart()
+    torch.cuda.synchronize(device)
+    cudart.cudaProfilerStart()
     if sol_runnable is not None:
         run_sol()
     if base_runnable is not None:
         run_base()
+    torch.cuda.synchronize(device)
+    cudart.cudaProfilerStop()
 
-    print(f"[ncu_driver] done which={args.which} batch_size={args.batch_size}", file=sys.stderr)
+    workload_tag = args.workload_uuid or f"batch_size={args.batch_size}"
+    print(f"[ncu_driver] done which={args.which} workload={workload_tag}", file=sys.stderr)
     return 0
 
 

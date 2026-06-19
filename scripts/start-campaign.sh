@@ -12,7 +12,7 @@ if [ $# -lt 2 ]; then
     echo "Usage: $0 <family> <max_rounds> [target_speedup]"
     echo ""
     echo "Arguments:"
-    echo "  family         - 主线算子 family（dsa_sparse_attention, gdn_prefill, gdn_decode, dsa_topk_indexer, paged_attention, moe_fp8）"
+    echo "  family         - 主线算子 family（dsa_sparse_attention, gdn_prefill, dsa_topk_indexer）"
     echo "  max_rounds     - Maximum number of optimization rounds (e.g., 10)"
     echo "  target_speedup - Optional target speedup (e.g., 2.0 for 2x)"
     echo ""
@@ -28,13 +28,10 @@ TARGET_SPEEDUP="${3:-}"
 CANONICAL_FAMILY="$("$PYTHON_BIN" "$PROJECT_ROOT/scripts/operator_policy.py" canonical "$FAMILY" 2>/dev/null || true)"
 if [ -z "$CANONICAL_FAMILY" ]; then
     echo "Error: unsupported family: $FAMILY"
-    echo "Only the six mainline families are allowed:"
+    echo "Only the three mainline families are allowed:"
     echo "  dsa_sparse_attention"
     echo "  gdn_prefill"
-    echo "  gdn_decode"
     echo "  dsa_topk_indexer"
-    echo "  paged_attention"
-    echo "  moe_fp8"
     exit 1
 fi
 FAMILY="$CANONICAL_FAMILY"

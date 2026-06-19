@@ -3,7 +3,7 @@
   "family_tier": "primary",
   "dataset_path": "/mnt/d/Agent/flashinfer-trace",
   "definition": "dsa_topk_indexer_fp8_h64_d128_topk2048_ps64",
-  "baseline_solution": "flashinfer_deepgemm_wrapper_2ba145",
+  "baseline_solution": "official_reference_dsa_topk_indexer_v1",
   "baseline_source_kind": "official_baseline",
   "comparison_denominator": "official_baseline",
   "accept_threshold": 1.05,
@@ -24,10 +24,50 @@
       "definition": "dsa_topk_indexer_fp8_h64_d128_topk2048_ps64",
       "op_type": "dsa_topk_indexer",
       "baseline_dataset_group": "dsa",
-      "baseline_solution": "flashinfer_deepgemm_wrapper_2ba145",
+      "baseline_solution": "official_reference_dsa_topk_indexer_v1",
       "compare_against": "official_baseline",
       "baseline_source_kind": "official_baseline"
     }
   ],
-  "status": "pending_baseline_capture"
+  "status": "baseline_captured",
+  "anchor": "round1-v12",
+  "anchor_solution": "kernelforge_dsa_topk_indexer_cuda_v17",
+  "anchor_kernel": "../../rounds/round-1/dsa_topk_indexer/src/main_v17.py",
+  "best_sol_vs_base": 1.878,
+  "latest_ncu_summary": "round1-v12(v17) 已完成真实 NCU 2025.2；在 v16 严格正确路径上，把 dequant/row_meta 缓存键从内容签名收敛到 tensor 对象身份，去掉热路径键计算开销后，全量 50/50 workload 的平均 sol/base 提升到 1.878x，同时保持失败 workload num_trials=20 PASS。",
+  "next_direction": "继续沿官方 eager 路径做低语义风险缓存与临时张量复用，但必须优先验证 mixed-length 大 batch workload；只有在失败 workload 多 trial、全量 workload 和真实 NCU 都通过后，才允许继续推进。",
+  "next_technique": "object-identity-cache-key, row-meta-cache, output-buffer-reuse, conservative-eager",
+  "latest_result": {
+    "variant": "round1-v12",
+    "solution_name": "kernelforge_dsa_topk_indexer_cuda_v17",
+    "decision": "ACCEPT",
+    "avg_sol_vs_base": 1.878,
+    "passed_workloads": 50,
+    "total_workloads": 50,
+    "sample_workload_uuid": "2f3b7321-e55c-4a11-9ab3-4aab5dd4ab3a",
+    "sample_axes": {
+      "batch_size": 30,
+      "max_num_pages": 36,
+      "num_pages": 177
+    },
+    "solution_latency_ms": 3.3729,
+    "baseline_latency_ms": 5.5972,
+    "ncu_evidence": "rounds/round-1/dsa_topk_indexer/profile/ncu_evidence.json",
+    "ncu_summary": "真实 NCU 2025.2 已采样；candidate 报告 solution_ncu_v17.ncu-rep，baseline 报告 baseline_ncu_v17.ncu-rep。当前方向保持官方 score/topk/token 映射不变，只把安全缓存键改成 tensor 对象身份，明显降低了热路径缓存键计算成本。",
+    "reason": "失败 workload num_trials=20 通过，全量 50/50 真实 workload 通过，且平均 sol/base=1.878x，高于 v16 的 1.264x。"
+  },
+  "baseline_capture": {
+    "timing_config": {
+      "num_trials": 1,
+      "warmup": 3,
+      "iters": 10
+    },
+    "declared_workloads": 50,
+    "eligible_workloads": 50,
+    "passed_workloads": 50,
+    "coverage_ratio": 1.0,
+    "avg_latency_ms": 11.1682,
+    "captured_on": "2026-06-17",
+    "notes": "只统计真实 safetensors 完整存在的 workload；baseline 阶段只记录 latency 和覆盖率。"
+  }
 }

@@ -1,1 +1,0 @@
-{"id":"official-baseline-v0","parent":null,"solution_name":"flashinfer_wrapper_9b7f1e","definition":"gdn_decode_qk4_v8_d128_k_last","decision":"BASELINE","description":"官方 baseline 方案占位锚点；来源于 flashinfer-trace baseline 数据集。"}

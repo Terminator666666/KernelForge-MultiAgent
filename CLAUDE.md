@@ -7,15 +7,13 @@
   skills for Blackwell/B200 optimization and Nsight Compute analysis.
 - **执行环境规则**：禁止在 Windows 主环境运行代码；但如果当前在 WSL / Linux 环境，
   则允许执行构建、验证、benchmark、Nsight Compute profile，并以真实运行结果作为闭环证据。
-- **主动优化范围（强制）**：当前仓库的闭环优化只允许聚焦 6 类高收益算子：
+  用户已确认本仓库闭环优化任务允许直接运行真实验证、benchmark 和 NCU。
+- **主动优化范围（强制）**：当前仓库的闭环优化只允许聚焦 3 类高收益算子：
   1. `dsa_sparse_attention`
   2. `gdn_prefill`
-  3. `gdn_decode`
-  4. `dsa_topk_indexer`
-  5. `paged_attention`（含 `gqa_paged_decode`、`mla_paged_decode`、`mla_paged_prefill`）
-  6. `moe_fp8`
+  3. `dsa_topk_indexer`
   FlashInfer-Bench 上游仍覆盖更多算子，但本仓库当前**不再把** `rmsnorm`、`gemm`、`rope`、
-  `sampling`、`gqa_ragged` 等作为主线闭环目标；除非用户单独下达重开指令。
+  `sampling`、`gqa_ragged`、`gdn_decode`、`paged_attention` 等作为主线闭环目标；除非用户单独下达重开指令。
 - **实现方式强制要求**：所有主线算子都必须在**独立工作区**中推进，基于官方 task /
   baseline 的语义、接口、shape contract 与 correctness contract，自写新的 Triton / CUDA /
   CuTe DSL kernel；默认**禁止把直接修改 FlashInfer 官方源码仓库中的内核实现**作为主线工作方式。
@@ -23,14 +21,24 @@
   validation (`D:/Agent/flashinfer-bench-main`) to be considered successful.
   Internal benchmarks are for development only.
 - Reject any candidate that relies on a broken baseline or a false speedup.
-- **加速比口径（强制）**：只认「相对官方 baseline」的加速比 `sol/base`
-  （官方 baseline = 数据集 `solutions/baseline/...` 里的 flashinfer 实现）。
+- **baseline 捕获口径（强制）**：baseline 阶段只记录真实 latency、真实正确性和真实 workload 覆盖率，
+  不把任何加速比当成绩。
+- **闭环加速比口径（强制）**：只认「相对当前不可变官方 baseline / expert baseline」的加速比 `sol/base`
+  （baseline = 数据集 `solutions/baseline/...` 中当前被选中的 official/expert baseline）。
+  `anchor`、`parent`、历史自研候选都只是派生链路，不能改名成 baseline 分母。
   「vs 参考实现 PyTorch」的加速比（`sol/ref`）只能用于确认正确性，**不得**作为成绩，
   因为打过朴素 PyTorch 对带宽瓶颈算子毫无含金量。
 - **最终成绩口径强制要求**：每个主线算子的最终结论只能认
   **相对 FlashInfer 官方 baseline / expert baseline 的提升**；允许在轮内做
   candidate-vs-parent 的 A/B，但那只能作为局部优化证据，不能替代最终成绩口径。
 - **闭环强制要求**：每一轮优化必须有本机真实 NCU 数据驱动，禁止凭空猜测优化方向。
+- **执行并发限制**：同一时间只启动一个 benchmark / NCU 任务；禁止并发跑多个候选或多个算子，
+  避免资源竞争、显存压力和 profile 数据失真。
+- **代表 workload 规则（快迭代强制）**：当前主线三类算子在日常闭环迭代中，默认只保留
+  **低 / 中 / 高各 1 个真实 workload** 作为代表集，总数固定为 3。
+  这 3 个 workload 必须来自真实 safetensors 数据，且要写入各自 family 的
+  `selected_workloads_file`。除非用户明确要求扩展覆盖，否则 benchmark / validate / 决策
+  都默认只按这 3 个代表 workload 执行。
 - **NCU 版本强制要求**：RTX 5070 / sm_120 的 Nsight Compute 采样只能使用
   `/usr/local/NVIDIA-Nsight-Compute-2025.2/ncu`。禁止使用 `/usr/local/cuda/bin/ncu`，
   因为后者在当前 WSL 环境会报 `LibraryNotLoaded`，不能作为有效证据。
@@ -39,9 +47,20 @@
   2. `skills/KernelWiki` 中与本轮瓶颈对应的页面。
 - **派生起点强制要求**：所有新轮次必须先读取数据集里的官方 baseline 源码，再从其派生新的候选代码；
   禁止继续从旧的 rejected 自研候选直接起步。工作区 `src/official_baseline/` 视为强制参考目录。
+  但优化方向、避坑项和优先级必须显式继承上一轮已经验证过的 NCU、KernelWiki 与 TRAPS 结论，
+  不允许脱离历史证据“按 baseline 源码重新从零猜”。
+- **baseline provenance 强制要求**：`baseline_solution`、`comparison_denominator`、
+  `baseline_source_kind`、`official_baseline_source_json` 必须保留为不可变 provenance 字段；
+  任何轮次都不能把自研候选回写为 baseline 分母。
 - **baseline NCU 复用规则**：官方 baseline 的 NCU 报告可以复用，但仅限
   `definition + batch_size + device + baseline_solution + NCU版本` 完全一致的情况；
   一旦其中任何一项变化，就必须重新采样。
+- **correctness 强制要求**：验证必须尽量复用 FlashInfer-Bench 官方 harness；
+  不能只抄 atol/rtol 逻辑而漏掉 invalid-value 检查。`NaN` / `Inf` 必须显式拒绝。
+- **角色隔离强制要求**：writer 负责实现，verifier / acceptance 负责验收。
+  verifier / acceptance 不得在验证阶段直接修改实现，也不得在 prompt 里要求对方替自己补功能。
+- **审计强制要求**：每轮都必须记录 writer / verifier / acceptance 各自读取、修改过哪些文件；
+  verifier / acceptance 的 `modified_files` 必须为空。
 - **KernelWiki 使用规则**：RTX 5070 / sm_120 属于 Blackwell 架构，因此每轮都必须先查
   `skills/KernelWiki` 再定方向；但要明确区分 **可迁移模式**（如 low-sm-utilization、
   memory-bound、vectorized-loads、register-budgeting）与 **仅限 SM100/B200 的特性**
@@ -80,7 +99,7 @@
   - NCU 实采（本机 5070，`profile/rmsnorm/`）：batch=16 时我的内存吞吐仅 5.70%，
     官方 35.99%；grid=16 仅占满 1/3 SM。**根因：小 batch 并行度不足 + 访存事务不紧凑。**
   - 当前状态：保留为官方 baseline 派生、真实 NCU 驱动的样板工程；**后续默认不再继续作为主线闭环对象**，
-    主资源转向下面 6 类高收益算子。
+    主资源转向下面 3 类高收益算子。
 
 ## 闭环优化流程（真实闭环，强制执行）
 
@@ -92,14 +111,16 @@
 2. brief     写 BRIEF.md：本轮目标(sol/base 提升)、方向(来自上轮NCU)、要避开的 TRAPS，
              并列出本轮必须参考的 KernelWiki 页面
 3. optimize  按 NCU 结论改 kernel（禁止凭空猜方向），并记录哪些 KernelWiki 页面支持该方向
-4. benchmark fib_inproc_validate.py 计时（本机 5070，CUDA events）
-5. validate  同脚本逐 workload 正确性比对（atol/rtol=1e-2），不过则 REJECT
+4. benchmark fib_inproc_validate.py 计时（本机 5070，CUDA events；默认 warmup=3, iters=10）
+5. validate  同脚本逐 workload 正确性比对（官方 harness 语义 + 显式 NaN/Inf 拒绝，
+             atol/rtol=1e-2）；只统计真实 safetensors 文件完整存在的 workload，并记录覆盖率，不过则 REJECT
 6. compare   以官方 baseline 为锚点算 sol/base（唯一成绩口径）
 7. decide    只有在“本轮真实 NCU 证据 + KernelWiki 依据”都完整时才允许做决策；
              正确性失败 → REJECT；sol/base ≥ 1.05 → ACCEPT；否则 REJECT/继续
-8. document  ACCEPT 才更新 reference/<family>/（README + solutions.jsonl + variants/）
-9. lessons   失败教训写 reference/<family>/TRAPS.md（下一轮 brief 自动注入）
-10. plan     用本轮 NCU + KernelWiki 定位新瓶颈，规划下一轮方向；回到 1
+8. audit     补齐角色审计记录；verifier / acceptance 不得写实现文件
+9. document  ACCEPT 才更新 reference/<family>/（README + solutions.jsonl + variants/）
+10. lessons  失败教训写 reference/<family>/TRAPS.md（下一轮 brief 自动注入）
+11. plan     用本轮 NCU + KernelWiki 定位新瓶颈，规划下一轮方向；回到 1
 ```
 
 终止条件：sol/base ≥ 1.05（ACCEPT 收敛）/ 连续 3 轮无改进 / 轮次上限。
@@ -132,12 +153,9 @@ python scripts/workflow/fib_inproc_validate.py \
 
 禁止出现“只有 benchmark，没有 NCU”；也禁止出现“有 NCU，但没有 KernelWiki 依据”的轮次。
 
-### 待办（主线只保留 6 类高收益算子）
+### 待办（主线只保留 3 类高收益算子）
 - **P0**：`dsa_sparse_attention`
 - **P0**：`gdn_prefill`
-- **P0**：`gdn_decode`
 - **P1**：`dsa_topk_indexer`
-- **P1**：`paged_attention`（`gqa_paged_decode`、`mla_paged_decode`、`mla_paged_prefill`）
-- **P1**：`moe_fp8`
 - 统一要求：每个家族都必须沿用“官方 baseline 派生 + `fib_inproc_validate.py` 验证 + 本机
   NCU 2025.2 实采 + KernelWiki 决策支撑”的闭环流程。

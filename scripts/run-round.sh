@@ -3,7 +3,7 @@
 
 # 说明：
 # - 优先从 reference/<family>/baseline.json 读取锚点、数据集、definition、上一轮结论
-# - family 必须属于当前主线六类算子，且所有新轮次都必须从官方 baseline 源码派生
+# - family 必须属于当前主线四类算子，且所有新轮次都必须从官方 baseline 源码派生
 # - 自动为本轮生成 round_config.json / BRIEF.md / draft.md
 # - 自动生成 NCU / KernelWiki 证据模板，未补齐前不得进入最终决策
 # - RTX 5070 / sm_120 的 NCU 证据只能使用 /usr/local/NVIDIA-Nsight-Compute-2025.2/ncu
@@ -35,6 +35,7 @@ REFERENCE_DIR="$PROJECT_ROOT/reference/$FAMILY"
 ROUND_DIR="$PROJECT_ROOT/rounds/round-$ROUND/$FAMILY"
 BASELINE_FILE="$REFERENCE_DIR/baseline.json"
 ROUND_CONFIG="$ROUND_DIR/round_config.json"
+ROUND_DATASET_ROOT="$ROUND_DIR/dataset-mini"
 
 if [ ! -d "$REFERENCE_DIR" ]; then
     echo "Error: Reference directory not found: $REFERENCE_DIR"
@@ -220,6 +221,7 @@ PY
 # Step 1: derive (create round environment)
 echo "Step 1/10: derive (creating round environment)"
 mkdir -p "$ROUND_DIR"/{docs,src,profile}
+mkdir -p "$ROUND_DATASET_ROOT"
 mkdir -p "$OFFICIAL_BASELINE_SOURCE_DIR"
 
 if [ "$DERIVE_FROM_OFFICIAL_BASELINE" = "1" ] && [ -n "$OFFICIAL_BASELINE_SOURCE_JSON" ] && [ -f "$OFFICIAL_BASELINE_SOURCE_JSON" ]; then
@@ -287,7 +289,13 @@ cat > "$ROUND_CONFIG" <<EOF
   "required_ncu_version": "$REQUIRED_NCU_VERSION",
   "derive_from_official_baseline": $([ "$DERIVE_FROM_OFFICIAL_BASELINE" = "1" ] && echo "true" || echo "false"),
   "official_baseline_source_json": "$OFFICIAL_BASELINE_SOURCE_JSON",
-  "official_baseline_source_dir": "$OFFICIAL_BASELINE_SOURCE_DIR"
+  "official_baseline_source_dir": "$OFFICIAL_BASELINE_SOURCE_DIR",
+  "audit_log_file": "$(realpath "$ROUND_DIR/docs/audit_log.json")",
+  "role_separation": {
+    "writer_can_modify": true,
+    "verifier_can_modify": false,
+    "acceptance_can_modify": false
+  }
 }
 EOF
 
@@ -336,7 +344,8 @@ $GOAL_BLOCK
 ## 上一轮证据
 - **决策原因**: ${LATEST_REASON:-暂无}
 - **NCU 摘要**: ${NCU_SUMMARY:-暂无，执行 profile 后请补充到 reference/$FAMILY/baseline.json}
-- **官方 baseline 派生规则**: 本轮必须从数据集里的官方 baseline 源码派生，参考源码位于：\`$OFFICIAL_BASELINE_SOURCE_DIR\`
+- **官方 baseline 派生规则**: 本轮必须从数据集里的官方 baseline 源码派生，参考源码位于：\`$OFFICIAL_BASELINE_SOURCE_DIR\`；
+  同时必须继承上一轮已经确认的 NCU 结论、KernelWiki 依据与 TRAPS，不能脱离历史证据重新拍脑袋起步
 
 ## 本轮硬约束证据
 - **真实 NCU 证据文件**: \`$NCU_EVIDENCE_FILE\`
@@ -345,8 +354,12 @@ $GOAL_BLOCK
 - **规则 2**: 必须记录本轮参考的 KernelWiki 页面，并说明其为何适用于本轮
 - **规则 3**: NCU 只能使用 \`/usr/local/NVIDIA-Nsight-Compute-2025.2/ncu\`；禁止使用 \`/usr/local/cuda/bin/ncu\`
 - **规则 4**: 没有补齐这两个文件时，\`./scripts/evaluate-round.sh\` 会直接失败，不允许进入决策
-- **规则 5**: 新轮次禁止从旧的自研 rejected 候选直接派生，必须先阅读并基于官方 baseline 源码展开改动
+- **规则 5**: 新轮次禁止从旧的自研 rejected 候选直接作为唯一代码起点；必须先阅读并基于官方 baseline 源码展开改动，
+  但优化方向必须显式继承上一轮已验证的 NCU / KernelWiki / TRAPS 结论
 - **规则 6**: 本轮 family policy 固定为 \`$COMPARISON_DENOMINATOR\`，不得把 parent/历史 anchor 当最终分母
+- **规则 7**: baseline 分母固定为 \`$BASELINE_SOLUTION\`，不得把任何自研 anchor / parent 回写成 baseline
+- **规则 8**: 正确性验证必须保留官方 harness 语义，并显式拒绝 NaN / Inf
+- **规则 9**: verifier / acceptance 不得修改实现代码，必须把读写文件记录进审计日志
 
 ## 约束
 - 必须使用真实 FlashInfer-Bench 数据集：\`$DATASET_PATH\`
@@ -477,9 +490,50 @@ else
     echo "  ✓ KernelWiki evidence template already exists, kept as-is"
 fi
 
+AUDIT_LOG_FILE="$ROUND_DIR/docs/audit_log.json"
+if [ ! -f "$AUDIT_LOG_FILE" ]; then
+cat > "$AUDIT_LOG_FILE" <<EOF
+{
+  "required": true,
+  "status": "PENDING",
+  "round": $ROUND,
+  "family": "$FAMILY",
+  "writer": {
+    "actor": "",
+    "read_files": [],
+    "modified_files": []
+  },
+  "verifier": {
+    "actor": "",
+    "read_files": [],
+    "modified_files": []
+  },
+  "acceptance": {
+    "actor": "",
+    "read_files": [],
+    "modified_files": []
+  },
+  "notes": ""
+}
+EOF
+echo "  ✓ Audit log template created"
+else
+    echo "  ✓ Audit log template already exists, kept as-is"
+fi
+
 if [ -f "$PROJECT_ROOT/docs/draft_template.md" ]; then
     cp "$PROJECT_ROOT/docs/draft_template.md" "$ROUND_DIR/docs/draft.md"
     echo "  ✓ Draft template copied"
+fi
+
+if [ -n "$DATASET_PATH" ] && [ -n "$DEFINITION" ] && [ -n "$BASELINE_SOLUTION" ]; then
+    "$PYTHON_BIN" "$PROJECT_ROOT/scripts/workflow/create_dataset_mini.py" \
+        --source-dataset "$DATASET_PATH" \
+        --target-dataset "$ROUND_DATASET_ROOT" \
+        --definition "$DEFINITION" \
+        --solution "$BASELINE_SOLUTION" \
+        --force-clean
+    echo "  ✓ dataset-mini prepared at: $ROUND_DATASET_ROOT"
 fi
 
 if [ -n "$DATASET_PATH" ] && [ -n "$DEFINITION" ] && [ -n "$CANDIDATE_SOLUTION" ] && [ -n "$OP_TYPE" ]; then
@@ -495,6 +549,7 @@ from pathlib import Path
 
 KERNEL_SRC = Path(__file__).resolve().parent / "kernel.cu"
 DATASET_ROOT = Path("$DATASET_PATH")
+ROUND_DATASET_ROOT = Path(__file__).resolve().parents[1] / "dataset-mini"
 AUTHOR = "$AUTHOR"
 OP_TYPE = "$OP_TYPE"
 DEFINITION = "$DEFINITION"
@@ -525,11 +580,12 @@ def main() -> None:
         "sources": [{"path": "kernel.cu", "content": cuda_source}]
     }
 
-    out_dir = DATASET_ROOT / "solutions" / (AUTHOR or "kernelforge") / OP_TYPE / DEFINITION
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"{SOLUTION_NAME}.json"
-    out_path.write_text(json.dumps(solution, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"已生成 solution: {out_path}")
+    for root in (DATASET_ROOT, ROUND_DATASET_ROOT):
+        out_dir = root / "solutions" / (AUTHOR or "kernelforge") / OP_TYPE / DEFINITION
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"{SOLUTION_NAME}.json"
+        out_path.write_text(json.dumps(solution, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"已生成 solution: {out_path}")
 
 
 if __name__ == "__main__":

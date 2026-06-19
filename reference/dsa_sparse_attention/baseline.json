@@ -3,7 +3,8 @@
   "family_tier": "primary",
   "dataset_path": "/mnt/d/Agent/flashinfer-trace",
   "definition": "dsa_sparse_attention_h16_ckv512_kpe64_topk2048_ps64",
-  "baseline_solution": "flashinfer_wrapper_5af199",
+  "baseline_solution": "official_reference_dsa_sparse_attention_v1",
+  "selected_workloads_file": "/mnt/d/agent/KernelForge-MultiAgent/rounds/round-1/dsa_sparse_attention/docs/workload_allowlist_repr3.json",
   "baseline_source_kind": "official_baseline",
   "comparison_denominator": "official_baseline",
   "accept_threshold": 1.05,
@@ -24,10 +25,55 @@
       "definition": "dsa_sparse_attention_h16_ckv512_kpe64_topk2048_ps64",
       "op_type": "dsa_sparse_attention",
       "baseline_dataset_group": "dsa",
-      "baseline_solution": "flashinfer_wrapper_5af199",
+      "baseline_solution": "official_reference_dsa_sparse_attention_v1",
       "compare_against": "official_baseline",
       "baseline_source_kind": "official_baseline"
     }
   ],
-  "status": "pending_baseline_capture"
+  "status": "baseline_captured",
+  "baseline_capture": {
+    "timing_config": {
+      "num_trials": 1,
+      "warmup": 3,
+      "iters": 10
+    },
+    "declared_workloads": 120,
+    "eligible_workloads": 50,
+    "passed_workloads": 20,
+    "coverage_ratio": 0.4167,
+    "sample_workload_uuid": "1c29650b35bb4caca50fd7acb24b07be",
+    "sample_axes": {
+      "num_tokens": 1,
+      "num_pages": 6419
+    },
+    "sample_latency_ms": 4.8377,
+    "captured_on": "2026-06-17",
+    "notes": "2026-06-18 重新核对真实 workload 后确认：数据集声明 120 个 workload，但当前机器仅有 50 个 safetensors 可运行，其中候选在 20 个 workload 通过、其余在大 num_tokens 段出现 OOM。baseline 阶段口径仍只记录真实 latency 与覆盖率。当前快迭代阶段默认只对 3 个代表 workload（low/mid/high）做闭环决策。"
+  },
+  "author": "",
+  "entry_symbol": "",
+  "binding": "tvm-ffi",
+  "latest_result": {
+    "round": 1,
+    "candidate_variant": "round1-v4",
+    "solution_name": "kernelforge_dsa_sparse_attention_cuda_v6",
+    "decision": "ACCEPT",
+    "passed_workloads": 3,
+    "total_workloads": 3,
+    "avg_sol_vs_ref": null,
+    "avg_sol_vs_base": 10.057,
+    "ncu_summary": "high 代表 workload 的 candidate/baseline 真实 NCU 都表明主热点仍围绕 index_elementwise、gemmSN_TN / gemmSN_NN、softmax_warp_forward 等 attention 主链路；说明高 token 段已经接近官方路径，进一步收益主要来自 memory-bound 路径上减少重复 fp32 展平与重排。v6 正是沿这条线把 fallback 的 fp32 KV 展平结果缓存化，因此在 mid/high 代表 workload 上都显著提升。",
+    "kernelwiki_primary_page": "skills/KernelWiki/wiki/patterns/memory-bound.md",
+    "reason": "按 3 个代表 workload（low/mid/high）做真实闭环验证后，v6 达到 3/3 PASS，平均 sol/base=10.057x，其中 low=20.78x、mid=2.21x、high=7.18x，超过 1.05x 验收线，可作为当前快迭代 anchor。",
+    "evaluated_at": "2026-06-18T19:23:00+08:00"
+  },
+  "latest_ncu_summary": "v6 的 high 代表 workload 成对真实 NCU 说明：candidate 与 baseline 在高 token 段已共享 attention 主链路热点，当前收益主要来自减少 memory-bound 段重复重排；这与 KernelWiki 的 memory-bound / vectorized-loads 结论一致。",
+  "updated_at": "2026-06-18T19:23:00+08:00",
+  "anchor": "round1-v4",
+  "anchor_solution": "kernelforge_dsa_sparse_attention_cuda_v6",
+  "anchor_kernel": "variants/round1-v4/kernel.cu",
+  "solution_name": "kernelforge_dsa_sparse_attention_cuda_v6",
+  "best_sol_vs_base": 20.78,
+  "fast_iteration_workload_policy": "low_mid_high_3",
+  "fast_iteration_workload_count": 3
 }

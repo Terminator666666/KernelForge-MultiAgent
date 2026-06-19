@@ -79,8 +79,14 @@ fields = {
     "CANDIDATE_VARIANT": pick(round_cfg.get("candidate_variant"), f"round{round_cfg.get('round', 0)}-v1"),
     "CANDIDATE_KERNEL": pick(round_cfg.get("candidate_kernel")),
     "ANCHOR_VARIANT": pick(round_cfg.get("anchor_variant"), baseline.get("anchor")),
+    "SAMPLE_WORKLOAD_UUID": pick(
+        round_cfg.get("sample_workload_uuid"),
+        (baseline.get("baseline_capture") or {}).get("sample_workload_uuid"),
+    ),
     "NCU_EVIDENCE_FILE": pick(round_cfg.get("ncu_evidence_file")),
     "KERNELWIKI_EVIDENCE_FILE": pick(round_cfg.get("kernelwiki_evidence_file")),
+    "SELECTED_WORKLOADS_FILE": pick(round_cfg.get("selected_workloads_file"), baseline.get("selected_workloads_file")),
+    "AUDIT_LOG_FILE": pick(round_cfg.get("audit_log_file")),
     "ACCEPT_THRESHOLD": str(pick(round_cfg.get("accept_threshold"), baseline.get("accept_threshold"), 1.05)),
     "DERIVE_FROM_OFFICIAL_BASELINE": "1" if bool(pick(round_cfg.get("derive_from_official_baseline"), baseline.get("derive_from_official_baseline"), True)) else "0",
     "COMPARISON_DENOMINATOR": pick(round_cfg.get("comparison_denominator"), baseline.get("comparison_denominator")),
@@ -126,20 +132,27 @@ def resolve_path(raw: str) -> Path:
 
 ncu_file_raw = round_cfg.get("ncu_evidence_file", "")
 kernelwiki_file_raw = round_cfg.get("kernelwiki_evidence_file", "")
+audit_log_file_raw = str(round_cfg.get("audit_log_file", "")).strip()
 if not ncu_file_raw:
     fail("Error: round_config.json 缺少 ncu_evidence_file")
 if not kernelwiki_file_raw:
     fail("Error: round_config.json 缺少 kernelwiki_evidence_file")
+if not audit_log_file_raw:
+    fail("Error: round_config.json 缺少 audit_log_file")
 
 ncu_file = resolve_path(ncu_file_raw)
 kernelwiki_file = resolve_path(kernelwiki_file_raw)
+audit_log_file = resolve_path(audit_log_file_raw)
 if not ncu_file.exists():
     fail(f"Error: NCU evidence file not found: {ncu_file}")
 if not kernelwiki_file.exists():
     fail(f"Error: KernelWiki evidence file not found: {kernelwiki_file}")
+if not audit_log_file.exists():
+    fail(f"Error: audit log file not found: {audit_log_file}")
 
 ncu = json.loads(ncu_file.read_text(encoding='utf-8'))
 kernelwiki = json.loads(kernelwiki_file.read_text(encoding='utf-8'))
+audit = json.loads(audit_log_file.read_text(encoding='utf-8'))
 
 policy_errors = validate_baseline_config(family, round_cfg)
 if policy_errors:
@@ -166,6 +179,8 @@ if ncu.get("status") != "COMPLETE":
     fail("Error: NCU evidence status 必须为 COMPLETE")
 if kernelwiki.get("status") != "COMPLETE":
     fail("Error: KernelWiki evidence status 必须为 COMPLETE")
+if audit.get("status") != "COMPLETE":
+    fail("Error: audit log status 必须为 COMPLETE")
 
 solution_profile = ncu.get("solution_profile") or {}
 baseline_profile = ncu.get("baseline_profile") or {}
@@ -246,9 +261,26 @@ if not decision_notes:
 if applicable_pages <= 0:
     fail("Error: KernelWiki evidence 至少要有一个页面标注 applicable_to_sm120=true")
 
+role_policy = round_cfg.get("role_separation") or {}
+for role_name in ("writer", "verifier", "acceptance"):
+    role_payload = audit.get(role_name) or {}
+    actor = str(role_payload.get("actor", "")).strip()
+    read_files = role_payload.get("read_files") or []
+    modified_files = role_payload.get("modified_files") or []
+    if not actor:
+        fail(f"Error: audit log 缺少 {role_name}.actor")
+    if not isinstance(read_files, list):
+        fail(f"Error: audit log 的 {role_name}.read_files 必须为数组")
+    if not isinstance(modified_files, list):
+        fail(f"Error: audit log 的 {role_name}.modified_files 必须为数组")
+    can_modify = bool(role_policy.get(f"{role_name}_can_modify", role_name == "writer"))
+    if not can_modify and modified_files:
+        fail(f"Error: {role_name} 不允许修改文件，但 audit log 记录了 modified_files")
+
 fields = {
     "NCU_EVIDENCE_FILE": str(ncu_file),
     "KERNELWIKI_EVIDENCE_FILE": str(kernelwiki_file),
+    "AUDIT_LOG_FILE": str(audit_log_file),
     "NCU_BOTTLENECK": bottleneck,
     "NCU_DECISION_DRIVER": decision_driver,
     "NCU_REQUIRED_BINARY": required_ncu_binary,
@@ -265,6 +297,7 @@ PY
 echo "  ✓ NCU evidence    : $NCU_EVIDENCE_FILE"
 echo "  ✓ NCU binary      : $NCU_REQUIRED_BINARY"
 echo "  ✓ KernelWiki refs : $KERNELWIKI_EVIDENCE_FILE"
+echo "  ✓ Audit log       : $AUDIT_LOG_FILE"
 if [ "${DERIVE_FROM_OFFICIAL_BASELINE:-}" = "1" ]; then
   echo "  ✓ Baseline derive  : official baseline source extracted"
 fi
@@ -279,7 +312,20 @@ echo "  dataset   : $DATASET_PATH"
 echo "  definition: $DEFINITION"
 echo "  solution  : $CANDIDATE_SOLUTION"
 echo "  baseline  : $BASELINE_SOLUTION"
+if [ -n "${SAMPLE_WORKLOAD_UUID:-}" ]; then
+  echo "  workload  : $SAMPLE_WORKLOAD_UUID"
+fi
+if [ -n "${SELECTED_WORKLOADS_FILE:-}" ]; then
+  echo "  allowlist : $SELECTED_WORKLOADS_FILE"
+fi
 echo ""
+
+WORKLOAD_ARGS=()
+if [ -n "${SELECTED_WORKLOADS_FILE:-}" ]; then
+    WORKLOAD_ARGS+=(--workload-allowlist-file "$SELECTED_WORKLOADS_FILE")
+elif [ -n "${SAMPLE_WORKLOAD_UUID:-}" ]; then
+    WORKLOAD_ARGS+=(--workload-uuid "$SAMPLE_WORKLOAD_UUID")
+fi
 
 set +e
 "$PYTHON_BIN" "$PROJECT_ROOT/scripts/workflow/fib_inproc_validate.py" \
@@ -287,6 +333,7 @@ set +e
     --definition "$DEFINITION" \
     --solution "$CANDIDATE_SOLUTION" \
     --baseline "$BASELINE_SOLUTION" \
+    "${WORKLOAD_ARGS[@]}" \
     > "$VALIDATE_LOG" 2>&1
 VALIDATE_EXIT=$?
 set -e
@@ -419,6 +466,13 @@ baseline.setdefault("comparison_denominator", round_cfg.get("comparison_denomina
 baseline.setdefault("baseline_source_kind", round_cfg.get("baseline_source_kind", ""))
 baseline.setdefault("family_tier", round_cfg.get("family_tier", "primary"))
 
+if baseline.get("baseline_solution") not in (None, "", round_cfg.get("baseline_solution")):
+    raise SystemExit("baseline_solution 已存在且与 round_config 不一致，拒绝覆盖不可变 baseline provenance")
+if baseline.get("comparison_denominator") not in (None, "", round_cfg.get("comparison_denominator")):
+    raise SystemExit("comparison_denominator 已存在且与 round_config 不一致，拒绝覆盖不可变 baseline provenance")
+if baseline.get("baseline_source_kind") not in (None, "", round_cfg.get("baseline_source_kind")):
+    raise SystemExit("baseline_source_kind 已存在且与 round_config 不一致，拒绝覆盖不可变 baseline provenance")
+
 baseline["latest_result"] = {
     "round": decision["round"],
     "candidate_variant": decision["candidate_variant"],
@@ -437,6 +491,8 @@ baseline["latest_result"] = {
 baseline["latest_ncu_summary"] = baseline["latest_result"]["ncu_summary"]
 
 baseline["updated_at"] = datetime.now().isoformat()
+baseline["official_baseline_source_json"] = round_cfg.get("official_baseline_source_json", baseline.get("official_baseline_source_json", ""))
+baseline["official_baseline_source_dir"] = round_cfg.get("official_baseline_source_dir", baseline.get("official_baseline_source_dir", ""))
 
 if decision["decision"] == "ACCEPT":
     baseline["anchor"] = decision["candidate_variant"]

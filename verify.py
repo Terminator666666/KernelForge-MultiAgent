@@ -38,7 +38,6 @@ REQUIRED_PATHS = [
     "kernels/operators/gqa_ragged/gqa_ragged_final.cu",
     "kernels/operators/mla_paged/mla_paged_final.cu",
     "kernels/operators/dsa_paged/dsa_paged_final.cu",
-    "kernels/operators/moe/moe_final.cu",
     "kernels/operators/rmsnorm/rmsnorm_final.cu",
     "kernels/operators/rope/rope_final.cu",
     "kernels/operators/sampling/sampling_final.cu",
@@ -111,10 +110,7 @@ def check_mainline_policy() -> bool:
     expected = {
         "dsa_sparse_attention",
         "gdn_prefill",
-        "gdn_decode",
         "dsa_topk_indexer",
-        "paged_attention",
-        "moe_fp8",
     }
     actual = {name for name, spec in families.items() if spec.get("tier") == "primary"}
     if actual != expected:

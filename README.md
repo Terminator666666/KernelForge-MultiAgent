@@ -32,20 +32,17 @@ Master Agent 决策
 - **FlashInfer-Bench**: 官方 benchmark / baseline / workload 验收来源
 
 ### 当前主线优化范围（强制）
-- 本仓库当前**只主动优化前 6 类高收益算子**：
+- 本仓库当前**只主动优化 3 类高收益算子**：
   1. `dsa_sparse_attention`
   2. `gdn_prefill`
-  3. `gdn_decode`
-  4. `dsa_topk_indexer`
-  5. `paged_attention`（含 `gqa_paged_decode`、`mla_paged_decode`、`mla_paged_prefill`）
-  6. `moe_fp8`
+  3. `dsa_topk_indexer`
 - 选择依据：
   - 对照 `mlsys2026-flashinfer-contest-main` 与 `AKO4X-main` 的真实结果，这几类算子更容易做出
     明显加速比；
   - `rmsnorm` / `gemm` 等算子在官方库中往往已经高度优化，继续深挖的平均收益更低。
 - 说明：
   - FlashInfer-Bench 上游仍覆盖更多算子类型；
-  - 但 **KernelForge-MultiAgent 当前闭环目标只限上述 6 类**；
+  - 但 **KernelForge-MultiAgent 当前闭环目标只限上述 3 类**；
   - 其他算子默认仅保留样板、验证或参考价值，除非用户单独要求重开。
 
 ### 当前主线实现方式（强制）
@@ -188,7 +185,7 @@ KernelForge-MultiAgent/
 ├── skills/                  # 知识库
 │   ├── KernelWiki/          # 优化知识（2179 PRs）
 │   └── ncu-report-skill/    # 性能分析
-├── kernels/operators/       # 内核实现目录（当前主线聚焦 6 类算子）
+├── kernels/operators/       # 内核实现目录（当前主线聚焦 3 类算子）
 └── prompts/                 # 三阶段提示词
 ```
 
@@ -201,22 +198,46 @@ KernelForge-MultiAgent/
 
 ### 三条铁律
 
-1. **加速比唯一口径 = `sol/base`**：只看「我的实现 vs 官方 FlashInfer baseline」。
+1. **baseline 捕获阶段只记录 latency**：baseline 只需要有真实正确性、真实时间和真实 workload 覆盖率，
+   不强调任何加速比。
+2. **闭环阶段加速比唯一口径 = `sol/base`**：只看「我的实现 vs 当前不可变官方 baseline / expert baseline」。
+   这里的 baseline 只能是 `baseline.json` 里锁定的 `baseline_solution`；`anchor`、`parent`、
+   历史自研候选都只是派生关系或中间证据，**不能被重命名成 baseline**。
    vs 朴素 PyTorch 参考实现（`sol/ref`）的加速比**没有意义**，仅作正确性旁证，不作为成绩。
-2. **优化方向必须来自 NCU**：每一轮改 kernel 前，必须先在本机用 Nsight Compute 采集
+3. **优化方向必须来自 NCU**：每一轮改 kernel 前，必须先在本机用 Nsight Compute 采集
    我的 kernel 与官方 baseline 的真实指标，定位瓶颈后再动手。禁止拍脑袋优化。
    对 RTX 5070 / sm_120，**只允许使用** `/usr/local/NVIDIA-Nsight-Compute-2025.2/ncu`；
    `/usr/local/cuda/bin/ncu` 在当前 WSL 环境会报 `LibraryNotLoaded`，不能作为有效证据。
-3. **决策必须参考 KernelWiki**：每一轮做 ACCEPT / REJECT 决策前，必须记录并引用
+4. **快迭代 workload 口径固定为 3 个代表点**：每个主线算子默认只测
+   低 / 中 / 高各 1 个真实 safetensors workload，并将其写入该 family 的
+   `selected_workloads_file`。除非用户明确要求扩展覆盖，否则闭环 benchmark / validate /
+   决策都只按这 3 个代表 workload 执行。
+5. **决策必须参考 KernelWiki**：每一轮做 ACCEPT / REJECT 决策前，必须记录并引用
    `skills/KernelWiki` 中与当前瓶颈匹配的页面，说明这些页面如何支撑本轮优化方向。RTX 5070 属于
    Blackwell 架构，因此必须使用 KernelWiki；但对仅限 SM100/B200 的特性要明确标注“不适用于 sm_120”。
-4. **新轮次必须基于官方 baseline 源码派生**：后续优化轮次不再允许直接从旧的 rejected 自研候选起步，
+6. **baseline 必须 immutable 且可追溯**：`baseline_solution`、`comparison_denominator`、
+   `baseline_source_kind` 必须视为锁定字段；轮次配置不得私自覆盖。每个 family 都必须记录
+   baseline provenance，至少包含官方 solution 名、来源 json 路径、source kind 和锁定语义。
+7. **正确性必须复用官方 harness 语义，且显式保留 invalid-value 拒绝**：
+   正确性判定优先复用 FlashInfer-Bench 官方 `compute_error_stats` / 容差逻辑；
+   同时必须显式拒绝 `NaN`、`Inf` 等 invalid values，不能只做 atol/rtol 比较。
+8. **新轮次必须基于官方 baseline 源码派生**：后续优化轮次不再允许直接从旧的 rejected 自研候选起步，
    必须先读取数据集 `solutions/baseline/...` 中的官方 baseline 源码，再基于它派生新的 `kernel.cu` 起点。
    工作区里的 `src/official_baseline/` 是强制参考目录。
-5. **证据驱动 ACCEPT/REJECT**：正确性不过 → REJECT；`sol/base < 1.05` → REJECT/继续迭代；
+   但派生时必须同时继承上一轮已经验证的 NCU 结论、KernelWiki 页面和 `TRAPS.md` 陷阱记录，
+   不允许只看新 baseline 源码就把历史证据全部丢掉。
+9. **证据驱动 ACCEPT/REJECT**：正确性不过 → REJECT；`sol/base < 1.05` → REJECT/继续迭代；
    `sol/base ≥ 1.05` 且正确，并且本轮 NCU + KernelWiki 证据齐全 → ACCEPT 并归档。
-6. **官方 baseline 的 NCU 可复用，但不能乱复用**：只有在 `definition + batch_size + device +
+10. **官方 baseline 的 NCU 可复用，但不能乱复用**：只有在 `definition + batch_size + device +
    baseline_solution + NCU版本` 完全一致时，才能复用同一份 baseline NCU 报告；否则必须重跑。
+11. **verifier / acceptance 角色不能反向改实现**：验证者只能读取候选、日志和证据，
+   不能在 verification prompt 里要求 verifier 直接补功能，更不能让 acceptance 角色修改实现代码后再给通过。
+12. **每轮必须留下 audit log**：必须记录 writer / verifier / acceptance 各自读写了哪些文件。
+   其中 verifier / acceptance 的 `modified_files` 必须为空；否则该轮直接视为角色隔离失效。
+13. **归档加速比必须可回溯到原始日志**：凡是写入 `reference/<family>/solutions.jsonl` 的
+   `sol_vs_base`，都必须能在同仓库里回溯到对应轮次的 `decision.json`、`validate.log`
+   和必要的 `ncu_evidence.json`。如果只有 reference 里的摘要数字、没有原始日志与决策文件，
+   则该条目只能算“待补证据”，不能视为完全审计通过的真实归档成绩。
 
 ### 10 步循环
 
@@ -225,13 +246,15 @@ KernelForge-MultiAgent/
 2. brief     写 BRIEF.md：本轮目标(sol/base 提升幅度)、优化方向(来自上一轮 NCU)、要避开的 TRAPS，
              并列出本轮必须参考的 KernelWiki 页面
 3. optimize  按 NCU 结论修改 kernel（方向必须有 NCU 依据），并明确记录它相对官方 baseline 源码的派生关系
-4. benchmark scripts/workflow/fib_inproc_validate.py 在本机 5070 计时
-5. validate  同脚本逐 workload 正确性比对（atol/rtol=1e-2），不过即 REJECT
+4. benchmark scripts/workflow/fib_inproc_validate.py 在本机 5070 计时（默认 warmup=3, iters=10）
+5. validate  同脚本逐 workload 正确性比对（复用官方 harness 语义 + 显式 NaN/Inf 拒绝，
+             atol/rtol=1e-2）；只统计真实 safetensors 文件完整存在的 workload，并记录覆盖率，不过即 REJECT
 6. compare   以官方 baseline 为锚点计算 sol/base —— 唯一成绩口径
 7. decide    只有在“本轮真实 NCU 证据 + KernelWiki 依据”齐全时才允许 REJECT / ACCEPT
-8. document  仅 ACCEPT 才更新 reference/<family>/（README + solutions.jsonl + variants/）
-9. lessons   把失败教训写入 reference/<family>/TRAPS.md（下一轮 brief 自动注入，避免重复踩坑）
-10. plan     用本轮 NCU 数据 + KernelWiki 页面定位新瓶颈，规划下一轮优化方向；回到第 1 步
+8. audit     补齐 writer / verifier / acceptance 的文件读写审计；verifier/acceptance 不得写实现
+9. document  仅 ACCEPT 才更新 reference/<family>/（README + solutions.jsonl + variants/）
+10. lessons  把失败教训写入 reference/<family>/TRAPS.md（下一轮 brief 自动注入，避免重复踩坑）
+11. plan     用本轮 NCU 数据 + KernelWiki 页面定位新瓶颈，规划下一轮优化方向；回到第 1 步
 ```
 
 终止条件：`sol/base ≥ 1.05`（收敛 ACCEPT）/ 连续 3 轮无改进 / 达到轮次上限。
@@ -272,18 +295,15 @@ python scripts/workflow/fib_inproc_validate.py \
 
 ---
 
-## 📊 当前聚焦的 6 类算子
+## 📊 当前聚焦的 3 类算子
 
-KernelForge-MultiAgent 当前的主动闭环资源只投向 6 类高收益算子。
+KernelForge-MultiAgent 当前的主动闭环资源只投向 3 类高收益算子。
 
 | 算子家族 | 代表 definition / 场景 | 当前优先级 | 说明 |
 |-----|------|--------|------|
 | **DSA Sparse Attention** | `dsa_sparse_attention_*` | P0 | 竞赛型高收益主战场 |
 | **GDN Prefill** | `gdn_prefill_*` | P0 | 变长 prefill，结构空间大 |
-| **GDN Decode** | `gdn_decode_*` | P0 | 小 kernel，调度/寄存器/launch 开销敏感 |
 | **DSA Top-k Indexer** | `dsa_topk_indexer_*` | P1 | 索引/访存/图捕获优化空间大 |
-| **Paged Attention** | `gqa_paged_decode_*`、`mla_paged_*` | P1 | 包含 GQA/MLA decode/prefill |
-| **MoE FP8** | `moe_fp8_*` | P1 | Block-scale / routing / fused GEMM |
 
 ### 非主线算子说明
 
@@ -300,9 +320,8 @@ KernelForge-MultiAgent 当前的主动闭环资源只投向 6 类高收益算子
 # GDN Prefill
 ./scripts/start-campaign.sh gdn_prefill 10
 
-# GDN Decode
-./scripts/start-campaign.sh gdn_decode 10
-```
+# DSA Top-k Indexer
+./scripts/start-campaign.sh dsa_topk_indexer 10
 
 说明：
 - 上面是当前主线建议入口。
@@ -319,7 +338,7 @@ KernelForge-MultiAgent 当前的主动闭环资源只投向 6 类高收益算子
 | [`master/MASTER.md`](master/MASTER.md) | **Master Agent 指南** ⭐ |
 | [`docs/HUMANIZE_INTEGRATION.md`](docs/HUMANIZE_INTEGRATION.md) | Humanize 使用指南 |
 | [`docs/STRUCTURED_WORKFLOW.md`](docs/STRUCTURED_WORKFLOW.md) | 整体工作流 |
-| [`docs/SUPPORTED_OPERATORS.md`](docs/SUPPORTED_OPERATORS.md) | 当前聚焦的 6 类算子说明 |
+| [`docs/SUPPORTED_OPERATORS.md`](docs/SUPPORTED_OPERATORS.md) | 当前聚焦的 3 类算子说明 |
 | [`docs/FLASHINFER_BENCH_VALIDATION.md`](docs/FLASHINFER_BENCH_VALIDATION.md) | 验收标准 |
 | [`reference/<family>/README.md`](reference/rmsnorm/README.md) | 家族归档示例 |
 | [`reference/<family>/TRAPS.md`](reference/rmsnorm/TRAPS.md) | 陷阱记录示例 |

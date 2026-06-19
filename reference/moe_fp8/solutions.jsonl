@@ -1,1 +1,0 @@
-{"id":"official-baseline-v0","parent":null,"solution_name":"flashinfer_wrapper_9sdjf3","definition":"moe_fp8_block_scale_ds_routing_topk8_ng8_kg4_e32_h7168_i2048","decision":"BASELINE","description":"官方 baseline 方案占位锚点；来源于 flashinfer-trace baseline 数据集。"}

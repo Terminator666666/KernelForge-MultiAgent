@@ -3,7 +3,8 @@
   "family_tier": "primary",
   "dataset_path": "/mnt/d/Agent/flashinfer-trace",
   "definition": "gdn_prefill_qk4_v8_d128_k_last",
-  "baseline_solution": "flashinfer_wrapper_123ca6",
+  "baseline_solution": "official_reference_gdn_prefill_v1",
+  "selected_workloads_file": "/mnt/d/agent/KernelForge-MultiAgent/rounds/round-1/gdn_prefill/docs/workload_allowlist_repr3.json",
   "baseline_source_kind": "official_baseline",
   "comparison_denominator": "official_baseline",
   "accept_threshold": 1.05,
@@ -24,10 +25,32 @@
       "definition": "gdn_prefill_qk4_v8_d128_k_last",
       "op_type": "gdn_prefill",
       "baseline_dataset_group": "gdn",
-      "baseline_solution": "flashinfer_wrapper_123ca6",
+      "baseline_solution": "official_reference_gdn_prefill_v1",
       "compare_against": "official_baseline",
       "baseline_source_kind": "official_baseline"
     }
   ],
-  "status": "pending_baseline_capture"
+  "status": "baseline_captured",
+  "baseline_capture": {
+    "timing_config": {
+      "num_trials": 1,
+      "warmup": 3,
+      "iters": 10
+    },
+    "declared_workloads": 50,
+    "eligible_workloads": 50,
+    "passed_workloads": 50,
+    "coverage_ratio": 1.0,
+    "sample_workload_uuid": "77daf91d-0660-4c4b-8c32-336a69281cd9",
+    "sample_axes": {
+      "total_seq_len": 6,
+      "num_seqs": 1,
+      "len_cu_seqlens": 2
+    },
+    "sample_latency_ms": null,
+    "captured_on": "2026-06-17",
+    "notes": "当前数据集已有 50 个真实 workload 与对应 safetensors。快迭代阶段默认只对 low/mid/high 3 个代表 workload 做闭环决策；baseline 阶段只记录真实 latency 和覆盖率，不计算 sol/base。"
+  },
+  "fast_iteration_workload_policy": "low_mid_high_3",
+  "fast_iteration_workload_count": 3
 }

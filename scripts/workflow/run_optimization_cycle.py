@@ -26,13 +26,10 @@ from operator_policy import canonicalize_family, list_primary_families  # type: 
 
 
 OPERATOR_SOURCES = {
-    # 当前主线只允许六类 family；底层先复用仓库现有实现目录
+    # 当前主线只允许三类 family；底层先复用仓库现有实现目录
     "dsa_sparse_attention": REPO_ROOT / "kernels" / "operators" / "dsa_paged" / "dsa_paged_final.cu",
     "gdn_prefill": REPO_ROOT / "kernels" / "operators" / "gdn" / "gdn_final.cu",
-    "gdn_decode": REPO_ROOT / "kernels" / "operators" / "gdn" / "gdn_final.cu",
     "dsa_topk_indexer": REPO_ROOT / "kernels" / "operators" / "dsa_paged" / "dsa_paged_final.cu",
-    "paged_attention": REPO_ROOT / "kernels" / "operators" / "gqa_paged" / "gqa_paged_final.cu",
-    "moe_fp8": REPO_ROOT / "kernels" / "operators" / "moe" / "moe_final.cu",
 }
 
 
@@ -143,13 +140,9 @@ class OptimizationCycle:
         self.feedback_file.write_text(json.dumps(feedback, indent=2), encoding="utf-8")
 
     def _generate_test_harness(self) -> str:
-        if self.operator == "paged_attention":
-            return self._generate_gqa_paged_test()
         if self.operator in {"dsa_sparse_attention", "dsa_topk_indexer"}:
             return self._generate_dsa_paged_test()
-        if self.operator == "moe_fp8":
-            return self._generate_moe_test()
-        if self.operator in {"gdn_prefill", "gdn_decode"}:
+        if self.operator == "gdn_prefill":
             return self._generate_gdn_test()
         raise ValueError(f"Unsupported operator: {self.operator}")
 
@@ -162,13 +155,6 @@ class OptimizationCycle:
             return "dsa_topk_indexer"
         if "gdn_prefill" in lowered:
             return "gdn_prefill"
-        if "gdn_decode" in lowered:
-            return "gdn_decode"
-        if any(token in lowered for token in ("paged_attention", "gqa_paged_decode", "mla_paged_decode", "mla_paged_prefill")):
-            return "paged_attention"
-        if "moe_fp8" in lowered or ("moe" in lowered and "fp8" in lowered):
-            return "moe_fp8"
-
         canonical = canonicalize_family(lowered)
         if canonical is not None:
             return canonical
@@ -283,20 +269,6 @@ int main() {
 // TODO: Implement DSA-Paged test harness
 int main() {
     std::printf("{\"status\": \"test_not_implemented\", \"operator\": \"dsa_paged\"}\n");
-    return 0;
-}
-'''
-
-    @staticmethod
-    def _generate_moe_test() -> str:
-        """生成 MoE 测试代码（占位符）"""
-        return r'''
-#include <cuda_runtime.h>
-#include <cstdio>
-
-// TODO: Implement MoE test harness
-int main() {
-    std::printf("{\"status\": \"test_not_implemented\", \"operator\": \"moe\"}\n");
     return 0;
 }
 '''
@@ -522,7 +494,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run one CUDA optimization feedback cycle")
     parser.add_argument(
         "kernel_name",
-        help="Kernel 或主线 family 名（dsa_sparse_attention, gdn_prefill, gdn_decode, dsa_topk_indexer, paged_attention, moe_fp8）",
+        help="Kernel 或主线 family 名（dsa_sparse_attention, gdn_prefill, dsa_topk_indexer）",
     )
     parser.add_argument("iteration", nargs="?", type=int, default=1)
     args = parser.parse_args()

@@ -73,6 +73,8 @@ def build_baseline_template(name: str, policy: Optional[Dict[str, Any]] = None) 
         "solution_prefix": spec.get("default_solution_prefix", ""),
         "required_ncu_binary": rules["required_ncu_binary"],
         "required_ncu_version": rules["required_ncu_version"],
+        "fast_iteration_workload_policy": rules.get("fast_iteration_workload_policy", "low_mid_high_3"),
+        "fast_iteration_workload_count": rules.get("fast_iteration_workload_count", 3),
         "allowed_definition_prefixes": spec.get("allowed_definition_prefixes", []),
         "allowed_op_types": spec.get("allowed_op_types", []),
         "supported_targets": spec.get("targets", []),
@@ -95,7 +97,7 @@ def validate_baseline_config(name: str, cfg: Dict[str, Any], policy: Optional[Di
     errors: List[str] = []
 
     if spec.get("tier") != "primary":
-        errors.append(f"{canonical} 不是当前主线六类算子之一")
+        errors.append(f"{canonical} 不是当前主线三类算子之一")
 
     if str(cfg.get("family", canonical)) != canonical:
         errors.append(f"baseline.json 的 family 必须为 {canonical}")
@@ -147,10 +149,26 @@ def validate_baseline_config(name: str, cfg: Dict[str, Any], policy: Optional[Di
 
     required_ncu_binary = str(cfg.get("required_ncu_binary", rules["required_ncu_binary"])).strip()
     required_ncu_version = str(cfg.get("required_ncu_version", rules["required_ncu_version"])).strip()
+    fast_iteration_workload_policy = str(
+        cfg.get("fast_iteration_workload_policy", rules.get("fast_iteration_workload_policy", "low_mid_high_3"))
+    ).strip()
+    fast_iteration_workload_count = int(
+        cfg.get("fast_iteration_workload_count", rules.get("fast_iteration_workload_count", 3))
+    )
     if required_ncu_binary != rules["required_ncu_binary"]:
         errors.append(f"required_ncu_binary 必须固定为 {rules['required_ncu_binary']}")
     if required_ncu_version != rules["required_ncu_version"]:
         errors.append(f"required_ncu_version 必须固定为 {rules['required_ncu_version']}")
+    if fast_iteration_workload_policy != rules.get("fast_iteration_workload_policy", "low_mid_high_3"):
+        errors.append(
+            "fast_iteration_workload_policy 必须与仓库规则一致："
+            f"{rules.get('fast_iteration_workload_policy', 'low_mid_high_3')}"
+        )
+    if fast_iteration_workload_count != int(rules.get("fast_iteration_workload_count", 3)):
+        errors.append(
+            "fast_iteration_workload_count 必须与仓库规则一致："
+            f"{int(rules.get('fast_iteration_workload_count', 3))}"
+        )
 
     return errors
 

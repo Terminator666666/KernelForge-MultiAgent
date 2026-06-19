@@ -5,6 +5,8 @@
     "derive_from_official_baseline": true,
     "decision_requires_ncu": true,
     "decision_requires_kernelwiki": true,
+    "fast_iteration_workload_policy": "low_mid_high_3",
+    "fast_iteration_workload_count": 3,
     "required_ncu_binary": "/usr/local/NVIDIA-Nsight-Compute-2025.2/ncu",
     "required_ncu_version": "2025.2",
     "default_dataset_path": "/mnt/d/Agent/flashinfer-trace",
@@ -15,20 +17,8 @@
     "dsa_sparse_attention": "dsa_sparse_attention",
     "gdn-prefill": "gdn_prefill",
     "gdn_prefill": "gdn_prefill",
-    "gdn-decode": "gdn_decode",
-    "gdn_decode": "gdn_decode",
     "dsa-topk-indexer": "dsa_topk_indexer",
-    "dsa_topk_indexer": "dsa_topk_indexer",
-    "paged-attention": "paged_attention",
-    "paged_attention": "paged_attention",
-    "gqa_paged_decode": "paged_attention",
-    "gqa-paged-decode": "paged_attention",
-    "mla_paged_decode": "paged_attention",
-    "mla-paged-decode": "paged_attention",
-    "mla_paged_prefill": "paged_attention",
-    "mla-paged-prefill": "paged_attention",
-    "moe-fp8": "moe_fp8",
-    "moe_fp8": "moe_fp8"
+    "dsa_topk_indexer": "dsa_topk_indexer"
   },
   "families": {
     "dsa_sparse_attention": {
@@ -44,14 +34,14 @@
       "default_definition": "dsa_sparse_attention_h16_ckv512_kpe64_topk2048_ps64",
       "default_op_type": "dsa_sparse_attention",
       "default_baseline_dataset_group": "dsa",
-      "default_baseline_solution": "flashinfer_wrapper_5af199",
+      "default_baseline_solution": "official_reference_dsa_sparse_attention_v1",
       "default_solution_prefix": "kernelforge_dsa_sparse_attention_cuda_v",
       "targets": [
         {
           "definition": "dsa_sparse_attention_h16_ckv512_kpe64_topk2048_ps64",
           "op_type": "dsa_sparse_attention",
           "baseline_dataset_group": "dsa",
-          "baseline_solution": "flashinfer_wrapper_5af199",
+          "baseline_solution": "official_reference_dsa_sparse_attention_v1",
           "compare_against": "official_baseline",
           "baseline_source_kind": "official_baseline"
         }
@@ -70,40 +60,14 @@
       "default_definition": "gdn_prefill_qk4_v8_d128_k_last",
       "default_op_type": "gdn_prefill",
       "default_baseline_dataset_group": "gdn",
-      "default_baseline_solution": "flashinfer_wrapper_123ca6",
+      "default_baseline_solution": "official_reference_gdn_prefill_v1",
       "default_solution_prefix": "kernelforge_gdn_prefill_cuda_v",
       "targets": [
         {
           "definition": "gdn_prefill_qk4_v8_d128_k_last",
           "op_type": "gdn_prefill",
           "baseline_dataset_group": "gdn",
-          "baseline_solution": "flashinfer_wrapper_123ca6",
-          "compare_against": "official_baseline",
-          "baseline_source_kind": "official_baseline"
-        }
-      ]
-    },
-    "gdn_decode": {
-      "tier": "primary",
-      "compare_against": "official_baseline",
-      "baseline_source_kind": "official_baseline",
-      "allowed_definition_prefixes": [
-        "gdn_decode_"
-      ],
-      "allowed_op_types": [
-        "gdn_decode"
-      ],
-      "default_definition": "gdn_decode_qk4_v8_d128_k_last",
-      "default_op_type": "gdn_decode",
-      "default_baseline_dataset_group": "gdn",
-      "default_baseline_solution": "flashinfer_wrapper_9b7f1e",
-      "default_solution_prefix": "kernelforge_gdn_decode_cuda_v",
-      "targets": [
-        {
-          "definition": "gdn_decode_qk4_v8_d128_k_last",
-          "op_type": "gdn_decode",
-          "baseline_dataset_group": "gdn",
-          "baseline_solution": "flashinfer_wrapper_9b7f1e",
+          "baseline_solution": "official_reference_gdn_prefill_v1",
           "compare_against": "official_baseline",
           "baseline_source_kind": "official_baseline"
         }
@@ -122,87 +86,14 @@
       "default_definition": "dsa_topk_indexer_fp8_h64_d128_topk2048_ps64",
       "default_op_type": "dsa_topk_indexer",
       "default_baseline_dataset_group": "dsa",
-      "default_baseline_solution": "flashinfer_deepgemm_wrapper_2ba145",
+      "default_baseline_solution": "official_reference_dsa_topk_indexer_v1",
       "default_solution_prefix": "kernelforge_dsa_topk_indexer_cuda_v",
       "targets": [
         {
           "definition": "dsa_topk_indexer_fp8_h64_d128_topk2048_ps64",
           "op_type": "dsa_topk_indexer",
           "baseline_dataset_group": "dsa",
-          "baseline_solution": "flashinfer_deepgemm_wrapper_2ba145",
-          "compare_against": "official_baseline",
-          "baseline_source_kind": "official_baseline"
-        }
-      ]
-    },
-    "paged_attention": {
-      "tier": "primary",
-      "compare_against": "expert_baseline",
-      "baseline_source_kind": "expert_baseline",
-      "allowed_definition_prefixes": [
-        "gqa_paged_decode_",
-        "mla_paged_decode_",
-        "mla_paged_prefill_"
-      ],
-      "allowed_op_types": [
-        "gqa_paged_decode",
-        "mla_paged_decode",
-        "mla_paged_prefill"
-      ],
-      "default_definition": "gqa_paged_decode_h32_kv8_d128_ps1",
-      "default_op_type": "gqa_paged_decode",
-      "default_baseline_dataset_group": "gqa_paged",
-      "default_baseline_solution": "flashinfer_wrapper_a9588f",
-      "default_solution_prefix": "kernelforge_paged_attention_cuda_v",
-      "notes": "paged_attention 族默认按 expert baseline 计分。当前归档默认 target 为 gqa_paged_decode_h32_kv8_d128_ps1；切换到 MLA decode/prefill 子目标时，必须同步更新 reference/paged_attention/baseline.json 中的 definition、op_type、baseline_solution，并保留同一 family 的 expert baseline 口径。",
-      "targets": [
-        {
-          "definition": "gqa_paged_decode_h32_kv8_d128_ps1",
-          "op_type": "gqa_paged_decode",
-          "baseline_dataset_group": "gqa_paged",
-          "baseline_solution": "flashinfer_wrapper_a9588f",
-          "compare_against": "expert_baseline",
-          "baseline_source_kind": "expert_baseline"
-        },
-        {
-          "definition": "mla_paged_decode_h16_ckv512_kpe64_ps1",
-          "op_type": "mla_paged_decode",
-          "baseline_dataset_group": "mla_paged",
-          "baseline_solution": "flashinfer_wrapper_03f7b0",
-          "compare_against": "expert_baseline",
-          "baseline_source_kind": "expert_baseline"
-        },
-        {
-          "definition": "mla_paged_prefill_causal_h16_ckv512_kpe64_ps1",
-          "op_type": "mla_paged_prefill",
-          "baseline_dataset_group": "mla_paged",
-          "baseline_solution": "flashinfer_wrapper_ea3787",
-          "compare_against": "expert_baseline",
-          "baseline_source_kind": "expert_baseline"
-        }
-      ]
-    },
-    "moe_fp8": {
-      "tier": "primary",
-      "compare_against": "official_baseline",
-      "baseline_source_kind": "official_baseline",
-      "allowed_definition_prefixes": [
-        "moe_fp8_"
-      ],
-      "allowed_op_types": [
-        "moe_fp8"
-      ],
-      "default_definition": "moe_fp8_block_scale_ds_routing_topk8_ng8_kg4_e32_h7168_i2048",
-      "default_op_type": "moe_fp8",
-      "default_baseline_dataset_group": "moe",
-      "default_baseline_solution": "flashinfer_wrapper_9sdjf3",
-      "default_solution_prefix": "kernelforge_moe_fp8_cuda_v",
-      "targets": [
-        {
-          "definition": "moe_fp8_block_scale_ds_routing_topk8_ng8_kg4_e32_h7168_i2048",
-          "op_type": "moe_fp8",
-          "baseline_dataset_group": "moe",
-          "baseline_solution": "flashinfer_wrapper_9sdjf3",
+          "baseline_solution": "official_reference_dsa_topk_indexer_v1",
           "compare_against": "official_baseline",
           "baseline_source_kind": "official_baseline"
         }
