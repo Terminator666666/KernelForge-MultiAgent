@@ -15,39 +15,6 @@ KernelForge-MultiAgent 是一个面向 FlashInfer 类算子的闭环优化工作
 - `skills/ncu-report-skill`
 - `flashinfer-bench`
 
-## 整体架构
-
-```mermaid
-flowchart TD
-    A[用户目标] --> B[Master Workflow]
-    B --> C[run-round.sh<br/>生成轮次工作区]
-    C --> D[rounds/round-N/family]
-    D --> E[official_baseline]
-    D --> F[candidate 实现]
-    D --> G[ncu_evidence.json]
-    D --> H[kernelwiki_evidence.json]
-
-    F --> I[fib_inproc_validate.py]
-    E --> I
-    I --> J[正确性 + latency]
-
-    F --> K[ncu_driver.py]
-    E --> K
-    K --> L[真实 NCU 报告]
-
-    J --> M[evaluate-round.sh]
-    L --> M
-    H --> M
-    M --> N[ACCEPT / REJECT]
-
-    N -->|ACCEPT| O[reference/family<br/>README + baseline + variants]
-    N -->|REJECT| P[TRAPS + 下一轮]
-
-    Q[flashinfer-trace 数据集] --> I
-    Q --> K
-    R[KernelWiki] --> H
-```
-
 ## 仓库内容
 
 | 路径 | 作用 |
