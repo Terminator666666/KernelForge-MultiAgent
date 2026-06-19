@@ -1,15 +1,14 @@
 # Kernels
 
-This directory contains the CUDA operator source code that should be kept in the repository.
+This directory contains only the kernel source files kept for the current mainline operator families.
 
 ## Layout
 
-- `operators/softmax`: final and true-naive Softmax kernels.
-- `operators/matmul`: final and true-naive FP16 MatMul kernels.
-- `operators/layernorm`: final and true-naive LayerNorm kernels.
-- `operators/rmsnorm`: final and true-naive RMSNorm kernels.
-- `generated/all_operators.cu`: convenience include file for building the current operator set.
-- `reference_archive`: reserved for historical search traces and iteration artifacts when they are intentionally published.
+- `operators/dsa_paged`: shared source bucket for the DSA mainline families
+  (`dsa_sparse_attention` and `dsa_topk_indexer`).
+- `operators/gdn`: source bucket for the `gdn_prefill` mainline family.
+- `generated/all_operators.cu`: convenience include file for the current mainline-only source set.
 
-The old root-level `.cu` files were consolidated here where recoverable or moved to `benchmarks/cuda`.
+Non-mainline operator source directories were intentionally removed from `kernels/operators/`
+to keep the published tree aligned with the repository's active optimization scope.
 Compiled objects, `.so` files, NCU reports, logs, and executable binaries are intentionally excluded.

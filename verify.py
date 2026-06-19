@@ -32,15 +32,8 @@ REQUIRED_PATHS = [
     "prompts/README.md",
     "kernels/README.md",
     "kernels/generated/all_operators.cu",
-    # 当前主线聚焦的算子类型
-    "kernels/operators/gemm/gemm_final.cu",
-    "kernels/operators/gqa_paged/gqa_paged_final.cu",
-    "kernels/operators/gqa_ragged/gqa_ragged_final.cu",
-    "kernels/operators/mla_paged/mla_paged_final.cu",
+    # 当前 kernels/ 目录只保留主线 family 对应源码
     "kernels/operators/dsa_paged/dsa_paged_final.cu",
-    "kernels/operators/rmsnorm/rmsnorm_final.cu",
-    "kernels/operators/rope/rope_final.cu",
-    "kernels/operators/sampling/sampling_final.cu",
     "kernels/operators/gdn/gdn_final.cu",
     "skills/KernelWiki/SKILL.md",
     "skills/ncu-report-skill/SKILL.md",

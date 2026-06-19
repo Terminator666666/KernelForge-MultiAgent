@@ -54,13 +54,15 @@ are preserved for historical context but are not the release entry points.
 
 ## Kernel Source Package
 
-Maintained operator code is centralized under:
+Maintained operator code is centralized under the current mainline-only package:
 
-- `kernels/operators/softmax/`
-- `kernels/operators/matmul/`
-- `kernels/operators/layernorm/`
-- `kernels/operators/rmsnorm/`
+- `kernels/operators/dsa_paged/`
+- `kernels/operators/gdn/`
 - `kernels/generated/all_operators.cu`
+
+The repository intentionally removed non-mainline operator source directories
+from `kernels/operators/` and now keeps only the source buckets that map to the
+active optimization families.
 
 Compiled objects, `.so` files, Nsight Compute reports, logs, and generated
 benchmark outputs are excluded by `.gitignore`.
